@@ -2,14 +2,14 @@ import { useMemo, useState, type ChangeEvent } from "react";
 import { fetchNodes, type NodeCost } from "../../lib/api";
 import { formatCurrency, formatPercentage, relativeTimeFromIso, toMonthlyCost } from "../../lib/utils";
 import { useApiData } from "../../hooks/useApiData";
-import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
-import { Button } from "../../components/ui/button";
-import { Progress } from "../../components/ui/progress";
-import { Badge } from "../../components/ui/badge";
-import { Input } from "../../components/ui/input";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
-import Skeleton from "../../components/ui/skeleton";
-import NodeDetailSheet from "../../components/nodes/NodeDetailSheet";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Skeleton } from "@/components/ui/skeleton";
+import NodeDetailSheet from "@/components/nodes/NodeDetailSheet";
 
 const statusStyles: Record<NodeCost["status"], string> = {
   Ready: "border-emerald-500/40 bg-emerald-500/10 text-emerald-200",
