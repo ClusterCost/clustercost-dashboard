@@ -1,117 +1,70 @@
 package agents
 
+import "time"
+
 // HealthResponse represents the payload returned by the agent health endpoint.
 type HealthResponse struct {
-	Status  string `json:"status"`
-	Version string `json:"version"`
+	Status    string    `json:"status"`
+	ClusterID string    `json:"clusterId"`
+	Timestamp time.Time `json:"timestamp"`
+	Version   string    `json:"version,omitempty"`
+	Region    string    `json:"region,omitempty"`
 }
 
-// SummaryResponse represents aggregated cluster level information returned by an agent.
-type SummaryResponse struct {
-	Cluster ClusterOverview `json:"cluster"`
-	Labels  []LabelEntry    `json:"labels"`
+// NamespacesResponse contains namespace level cost data plus metadata.
+type NamespacesResponse struct {
+	Items     []NamespaceCost `json:"items"`
+	Timestamp time.Time       `json:"timestamp"`
 }
 
-// ClusterOverview mirrors the cluster-level payload from the agent summary endpoint.
-type ClusterOverview struct {
-	ClusterName             string                    `json:"clusterName"`
-	Provider                string                    `json:"provider"`
-	Region                  string                    `json:"region"`
-	HourlyCost              float64                   `json:"hourlyCost"`
-	TotalCpuRequestMilli    float64                   `json:"totalCpuRequestMilli"`
-	TotalMemoryRequestBytes float64                   `json:"totalMemoryRequestBytes"`
-	PodCount                int                       `json:"podCount"`
-	NodeCount               int                       `json:"nodeCount"`
-	GeneratedAtUnix         int64                     `json:"generatedAtUnix"`
-	CostByInstanceType      []ClusterInstanceTypeCost `json:"costByInstanceType"`
-}
-
-// LabelEntry represents a single label breakdown row (key/value pair + cost).
-type LabelEntry struct {
-	Key        string  `json:"key"`
-	Value      string  `json:"value"`
-	HourlyCost float64 `json:"hourlyCost"`
-}
-
-// TopNamespaceCost is a simplified view of high-volume namespaces.
-type TopNamespaceCost struct {
-	Namespace  string  `json:"namespace"`
-	HourlyCost float64 `json:"hourlyCost"`
-}
-
-// LabelCost describes cost breakdowns for a specific label key.
-type LabelCost struct {
-	Value      string  `json:"value"`
-	HourlyCost float64 `json:"hourlyCost"`
-}
-
-// ClusterInstanceTypeCost represents instance pricing data from the agent summary.
-type ClusterInstanceTypeCost struct {
-	InstanceType        string  `json:"instanceType"`
-	NodeCount           int     `json:"nodeCount"`
-	RawHourlyCost       float64 `json:"rawHourlyCost"`
-	AllocatedHourlyCost float64 `json:"allocatedHourlyCost"`
-}
-
-// InstanceTypeCost shows aggregated cost per instance type in the dashboard API.
-type InstanceTypeCost struct {
-	InstanceType string  `json:"instanceType"`
-	NodeCount    int     `json:"nodeCount"`
-	HourlyCost   float64 `json:"hourlyCost"`
-}
-
-// NamespaceCost contains per-namespace allocation information.
+// NamespaceCost contains per-namespace allocation information already aggregated by the agent.
 type NamespaceCost struct {
-	Namespace          string  `json:"namespace"`
-	Team               string  `json:"team"`
-	Env                string  `json:"env"`
-	HourlyCost         float64 `json:"hourlyCost"`
-	CPURequestedCores  float64 `json:"cpuRequestedCores"`
-	CPUUsedCores       float64 `json:"cpuUsedCores"`
-	MemoryRequestedGiB float64 `json:"memoryRequestedGiB"`
-	MemoryUsedGiB      float64 `json:"memoryUsedGiB"`
-	PodCount           int     `json:"podCount"`
+	ClusterID          string            `json:"clusterId"`
+	Namespace          string            `json:"namespace"`
+	HourlyCost         float64           `json:"hourlyCost"`
+	PodCount           int               `json:"podCount"`
+	CPURequestMilli    int64             `json:"cpuRequestMilli"`
+	MemoryRequestBytes int64             `json:"memoryRequestBytes"`
+	CPUUsageMilli      int64             `json:"cpuUsageMilli"`
+	MemoryUsageBytes   int64             `json:"memoryUsageBytes"`
+	Labels             map[string]string `json:"labels"`
+	Environment        string            `json:"environment"`
+}
+
+// NodesResponse contains node level cost and utilization data.
+type NodesResponse struct {
+	Items     []NodeCost `json:"items"`
+	Timestamp time.Time  `json:"timestamp"`
 }
 
 // NodeCost represents node-level utilization and pricing.
 type NodeCost struct {
-	Name                 string  `json:"name"`
-	InstanceType         string  `json:"instanceType"`
-	AvailabilityZone     string  `json:"availabilityZone"`
-	RawNodePriceHourly   float64 `json:"rawNodePriceHourly"`
-	AllocatedCostHourly  float64 `json:"allocatedCostHourly"`
-	CPUAllocatableCores  float64 `json:"cpuAllocatableCores"`
-	CPURequestedCores    float64 `json:"cpuRequestedCores"`
-	CPUUsedCores         float64 `json:"cpuUsedCores"`
-	MemoryAllocatableGiB float64 `json:"memoryAllocatableGiB"`
-	MemoryRequestedGiB   float64 `json:"memoryRequestedGiB"`
-	MemoryUsedGiB        float64 `json:"memoryUsedGiB"`
+	ClusterID              string            `json:"clusterId"`
+	NodeName               string            `json:"nodeName"`
+	HourlyCost             float64           `json:"hourlyCost"`
+	CPUUsagePercent        float64           `json:"cpuUsagePercent"`
+	MemoryUsagePercent     float64           `json:"memoryUsagePercent"`
+	CPUAllocatableMilli    int64             `json:"cpuAllocatableMilli"`
+	MemoryAllocatableBytes int64             `json:"memoryAllocatableBytes"`
+	PodCount               int               `json:"podCount"`
+	Status                 string            `json:"status"`
+	IsUnderPressure        bool              `json:"isUnderPressure"`
+	InstanceType           string            `json:"instanceType,omitempty"`
+	Labels                 map[string]string `json:"labels"`
+	Taints                 []string          `json:"taints,omitempty"`
 }
 
-// WorkloadCost aggregates costs per workload kind/name combination.
-type WorkloadCost struct {
-	Namespace          string   `json:"namespace"`
-	WorkloadKind       string   `json:"workloadKind"`
-	WorkloadName       string   `json:"workloadName"`
-	Team               string   `json:"team"`
-	Env                string   `json:"env"`
-	Replicas           int      `json:"replicas"`
-	HourlyCost         float64  `json:"hourlyCost"`
-	CPURequestedCores  float64  `json:"cpuRequestedCores"`
-	CPUUsedCores       float64  `json:"cpuUsedCores"`
-	MemoryRequestedGiB float64  `json:"memoryRequestedGiB"`
-	MemoryUsedGiB      float64  `json:"memoryUsedGiB"`
-	Nodes              []string `json:"nodes"`
+// ResourcesResponse contains cluster-wide resource efficiency information.
+type ResourcesResponse struct {
+	Snapshot  ResourceSnapshot `json:"snapshot"`
+	Timestamp time.Time        `json:"timestamp"`
 }
 
-// PodCost contains per-pod level metrics for drill downs.
-type PodCost struct {
-	Namespace          string  `json:"namespace"`
-	PodName            string  `json:"podName"`
-	NodeName           string  `json:"nodeName"`
-	HourlyCost         float64 `json:"hourlyCost"`
-	CPURequestedCores  float64 `json:"cpuRequestedCores"`
-	CPUUsedCores       float64 `json:"cpuUsedCores"`
-	MemoryRequestedGiB float64 `json:"memoryRequestedGiB"`
-	MemoryUsedGiB      float64 `json:"memoryUsedGiB"`
+// ResourceSnapshot aggregates CPU and memory request/usage totals plus node cost.
+type ResourceSnapshot struct {
+	CPUUsageMilliTotal      int64   `json:"cpuUsageMilliTotal"`
+	CPURequestMilliTotal    int64   `json:"cpuRequestMilliTotal"`
+	MemoryUsageBytesTotal   int64   `json:"memoryUsageBytesTotal"`
+	MemoryRequestBytesTotal int64   `json:"memoryRequestBytesTotal"`
+	TotalNodeHourlyCost     float64 `json:"totalNodeHourlyCost"`
 }

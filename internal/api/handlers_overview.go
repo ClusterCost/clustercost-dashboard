@@ -8,7 +8,9 @@ import (
 
 // Overview serves the aggregated overview payload.
 func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
-	overview, err := h.store.Overview()
+	limit := parseLimit(r.URL.Query().Get("limitTopNamespaces"), 5, 20)
+
+	overview, err := h.store.Overview(limit)
 	if err != nil {
 		if err == store.ErrNoData {
 			writeError(w, http.StatusServiceUnavailable, "data not yet available")

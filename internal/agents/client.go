@@ -25,48 +25,32 @@ func NewClient(timeout time.Duration) *Client {
 
 func (c *Client) FetchHealth(ctx context.Context, baseURL string) (HealthResponse, error) {
 	var resp HealthResponse
-	if err := c.get(ctx, baseURL, "/api/health", &resp); err != nil {
+	if err := c.get(ctx, baseURL, "/agent/v1/health", &resp); err != nil {
 		return HealthResponse{}, err
 	}
 	return resp, nil
 }
 
-func (c *Client) FetchSummary(ctx context.Context, baseURL string) (SummaryResponse, error) {
-	var resp SummaryResponse
-	if err := c.get(ctx, baseURL, "/api/cost/summary", &resp); err != nil {
-		return SummaryResponse{}, err
+func (c *Client) FetchNamespaces(ctx context.Context, baseURL string) (NamespacesResponse, error) {
+	var resp NamespacesResponse
+	if err := c.get(ctx, baseURL, "/agent/v1/namespaces", &resp); err != nil {
+		return NamespacesResponse{}, err
 	}
 	return resp, nil
 }
 
-func (c *Client) FetchNamespaces(ctx context.Context, baseURL string) ([]NamespaceCost, error) {
-	var resp []NamespaceCost
-	if err := c.get(ctx, baseURL, "/api/cost/namespaces", &resp); err != nil {
-		return nil, err
+func (c *Client) FetchNodes(ctx context.Context, baseURL string) (NodesResponse, error) {
+	var resp NodesResponse
+	if err := c.get(ctx, baseURL, "/agent/v1/nodes", &resp); err != nil {
+		return NodesResponse{}, err
 	}
 	return resp, nil
 }
 
-func (c *Client) FetchNodes(ctx context.Context, baseURL string) ([]NodeCost, error) {
-	var resp []NodeCost
-	if err := c.get(ctx, baseURL, "/api/cost/nodes", &resp); err != nil {
-		return nil, err
-	}
-	return resp, nil
-}
-
-func (c *Client) FetchWorkloads(ctx context.Context, baseURL string) ([]WorkloadCost, error) {
-	var resp []WorkloadCost
-	if err := c.get(ctx, baseURL, "/api/cost/workloads", &resp); err != nil {
-		return nil, err
-	}
-	return resp, nil
-}
-
-func (c *Client) FetchPods(ctx context.Context, baseURL string) ([]PodCost, error) {
-	var resp []PodCost
-	if err := c.get(ctx, baseURL, "/api/cost/pods", &resp); err != nil {
-		return nil, err
+func (c *Client) FetchResources(ctx context.Context, baseURL string) (ResourcesResponse, error) {
+	var resp ResourcesResponse
+	if err := c.get(ctx, baseURL, "/agent/v1/resources", &resp); err != nil {
+		return ResourcesResponse{}, err
 	}
 	return resp, nil
 }

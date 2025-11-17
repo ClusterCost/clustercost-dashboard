@@ -29,7 +29,7 @@ const LayoutShell = ({ children }: { children: React.ReactNode }) => {
       <Sidebar />
       <div className="flex flex-1 flex-col">
         {health ? (
-          <TopBar status={health.status} version={health.version} onRefresh={refresh} />
+          <TopBar status={health.status} clusterName={health.clusterName} timestamp={health.timestamp} onRefresh={refresh} />
         ) : (
           <div className="border-b border-border p-4">
             <Skeleton className="h-8 w-64" />

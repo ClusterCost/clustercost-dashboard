@@ -3,12 +3,28 @@ package api
 import (
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/clustercost/clustercost-dashboard/internal/store"
 )
 
-// Namespaces exposes namespace level cost metrics.
+const (
+	defaultNamespaceLimit = 50
+	maxNamespaceLimit     = 200
+)
+
+// Namespaces exposes namespace level cost metrics with filtering and pagination.
 func (h *Handler) Namespaces(w http.ResponseWriter, r *http.Request) {
-	data, err := h.store.Namespaces()
+	q := r.URL.Query()
+
+	filter := store.NamespaceFilter{
+		Environment: q.Get("environment"),
+		Search:      q.Get("search"),
+		Limit:       parseLimit(q.Get("limit"), defaultNamespaceLimit, maxNamespaceLimit),
+		Offset:      parseOffset(q.Get("offset")),
+	}
+
+	resp, err := h.store.NamespaceList(filter)
 	if err != nil {
 		if err == store.ErrNoData {
 			writeError(w, http.StatusServiceUnavailable, "data not yet available")
@@ -18,5 +34,26 @@ func (h *Handler) Namespaces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, data)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// NamespaceDetail returns a single namespace entry.
+func (h *Handler) NamespaceDetail(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "namespace is required")
+		return
+	}
+
+	ns, err := h.store.NamespaceDetail(name)
+	if err != nil {
+		if err == store.ErrNoData {
+			writeError(w, http.StatusNotFound, "namespace not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, ns)
 }

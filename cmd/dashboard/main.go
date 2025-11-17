@@ -25,7 +25,7 @@ func main() {
 		logger.Fatalf("load config: %v", err)
 	}
 
-	s := store.New(cfg.Agents)
+	s := store.New(cfg.Agents, cfg.RecommendedAgentVersion)
 	client := agents.NewClient(10 * time.Second)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -89,34 +89,22 @@ func scrapeAgent(ctx context.Context, client *agents.Client, cfg config.AgentCon
 		snapshot.Health = &health
 	}
 
-	if summary, err := client.FetchSummary(agentCtx, cfg.BaseURL); err != nil {
-		errs = append(errs, fmt.Sprintf("summary: %v", err))
-	} else {
-		snapshot.Summary = &summary
-	}
-
 	if namespaces, err := client.FetchNamespaces(agentCtx, cfg.BaseURL); err != nil {
 		errs = append(errs, fmt.Sprintf("namespaces: %v", err))
 	} else {
-		snapshot.Namespaces = namespaces
+		snapshot.Namespaces = &namespaces
 	}
 
 	if nodes, err := client.FetchNodes(agentCtx, cfg.BaseURL); err != nil {
 		errs = append(errs, fmt.Sprintf("nodes: %v", err))
 	} else {
-		snapshot.Nodes = nodes
+		snapshot.Nodes = &nodes
 	}
 
-	if workloads, err := client.FetchWorkloads(agentCtx, cfg.BaseURL); err != nil {
-		errs = append(errs, fmt.Sprintf("workloads: %v", err))
+	if resources, err := client.FetchResources(agentCtx, cfg.BaseURL); err != nil {
+		errs = append(errs, fmt.Sprintf("resources: %v", err))
 	} else {
-		snapshot.Workloads = workloads
-	}
-
-	if pods, err := client.FetchPods(agentCtx, cfg.BaseURL); err != nil {
-		errs = append(errs, fmt.Sprintf("pods: %v", err))
-	} else {
-		snapshot.Pods = pods
+		snapshot.Resources = &resources
 	}
 
 	if len(errs) > 0 {

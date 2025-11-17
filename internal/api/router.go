@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/cors"
 
 	"github.com/clustercost/clustercost-dashboard/internal/static"
 	"github.com/clustercost/clustercost-dashboard/internal/store"
@@ -24,14 +25,25 @@ func NewRouter(s *store.Store) http.Handler {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
+	r.Use(cors.Handler(cors.Options{
+		AllowedOrigins:   []string{"*"},
+		AllowedMethods:   []string{http.MethodGet, http.MethodOptions},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Requested-With"},
+		AllowCredentials: false,
+		MaxAge:           300,
+	}))
 
 	r.Route("/api", func(api chi.Router) {
 		api.Get("/health", h.Health)
-		api.Get("/overview", h.Overview)
-		api.Get("/namespaces", h.Namespaces)
-		api.Get("/pods", h.Pods)
-		api.Get("/nodes", h.Nodes)
-		api.Get("/workloads", h.Workloads)
+		api.Route("/cost", func(cost chi.Router) {
+			cost.Get("/overview", h.Overview)
+			cost.Get("/namespaces", h.Namespaces)
+			cost.Get("/namespaces/{name}", h.NamespaceDetail)
+			cost.Get("/nodes", h.Nodes)
+			cost.Get("/nodes/{name}", h.NodeDetail)
+			cost.Get("/resources", h.Resources)
+		})
+		api.Get("/agent", h.AgentStatus)
 		api.Get("/agents", h.Agents)
 	})
 

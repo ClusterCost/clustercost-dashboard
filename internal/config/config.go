@@ -20,9 +20,10 @@ type AgentConfig struct {
 
 // Config contains runtime settings for the dashboard backend.
 type Config struct {
-	ListenAddr   string        `yaml:"listenAddr"`
-	PollInterval time.Duration `yaml:"pollInterval"`
-	Agents       []AgentConfig `yaml:"agents"`
+	ListenAddr              string        `yaml:"listenAddr"`
+	PollInterval            time.Duration `yaml:"pollInterval"`
+	Agents                  []AgentConfig `yaml:"agents"`
+	RecommendedAgentVersion string        `yaml:"recommendedAgentVersion"`
 }
 
 // Default returns the default configuration used when no other information is provided.
@@ -74,6 +75,10 @@ func Load() (Config, error) {
 		}
 	}
 
+	if expected := os.Getenv("RECOMMENDED_AGENT_VERSION"); expected != "" {
+		cfg.RecommendedAgentVersion = expected
+	}
+
 	if len(cfg.Agents) == 0 {
 		return Config{}, errors.New("no agents configured - set CONFIG_FILE or AGENT_URLS")
 	}
@@ -112,5 +117,8 @@ func merge(dst *Config, src Config) {
 
 	if len(src.Agents) > 0 {
 		dst.Agents = src.Agents
+	}
+	if src.RecommendedAgentVersion != "" {
+		dst.RecommendedAgentVersion = src.RecommendedAgentVersion
 	}
 }

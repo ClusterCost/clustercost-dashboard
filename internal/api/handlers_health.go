@@ -2,32 +2,42 @@ package api
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/clustercost/clustercost-dashboard/internal/store"
 )
 
-const version = "0.1.0"
-
-// Health returns the dashboard health summary along with agent information.
+// Health returns a simple readiness payload.
 func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
-	agents := h.store.Agents()
+	clusterName, timestamp, err := h.store.ClusterMetadata()
 	status := "ok"
-	for _, agent := range agents {
-		if agent.Status != "healthy" {
-			status = "degraded"
-			break
+
+	switch err {
+	case nil:
+		agents := h.store.Agents()
+		for _, agent := range agents {
+			if agent.Status != "healthy" {
+				status = "degraded"
+				break
+			}
 		}
+	case store.ErrNoData:
+		status = "initializing"
+		if timestamp.IsZero() {
+			timestamp = time.Now().UTC()
+		}
+	default:
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 
-	type response struct {
-		Status  string            `json:"status"`
-		Version string            `json:"version"`
-		Agents  []store.AgentInfo `json:"agents"`
+	if timestamp.IsZero() {
+		timestamp = time.Now().UTC()
 	}
 
-	writeJSON(w, http.StatusOK, response{
-		Status:  status,
-		Version: version,
-		Agents:  agents,
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":      status,
+		"clusterName": clusterName,
+		"timestamp":   timestamp,
 	})
 }

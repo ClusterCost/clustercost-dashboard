@@ -1,12 +1,12 @@
 import { NavLink } from "react-router-dom";
 import { cn } from "../../lib/utils";
-import { Gauge, LayoutGrid, Server, Layers, Network, Cloud } from "lucide-react";
+import { Gauge, LayoutGrid, Server, PieChart, Network, Cloud } from "lucide-react";
 
 const navItems = [
   { to: "/", label: "Overview", icon: Gauge },
   { to: "/namespaces", label: "Namespaces", icon: LayoutGrid },
   { to: "/nodes", label: "Nodes", icon: Server },
-  { to: "/workloads", label: "Workloads", icon: Layers },
+  { to: "/resources", label: "Resources", icon: PieChart },
   { to: "/agents", label: "Agents", icon: Network },
   { to: "/connect-cloud", label: "Connect Cloud", icon: Cloud }
 ];
