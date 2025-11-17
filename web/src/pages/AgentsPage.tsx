@@ -1,10 +1,10 @@
 import { useMemo } from "react";
 import { fetchAgentStatus, type AgentDatasetStatus, type AgentStatusResponse } from "../lib/api";
 import { useApiData } from "../hooks/useApiData";
-import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
-import { Button } from "../components/ui/button";
-import Skeleton from "../components/ui/skeleton";
-import { Badge } from "../components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
 import { relativeTimeFromIso, formatNumber } from "../lib/utils";
 
 const statusConfig: Record<AgentStatusResponse["status"], { label: string; tone: string; description: string }> = {

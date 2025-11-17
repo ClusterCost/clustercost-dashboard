@@ -1,45 +1,45 @@
-import { Button } from "../components/ui/button";
-import { Badge } from "../components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 
-const benefits = [
-  { title: "Multi-cluster view", subtitle: "Every cluster, one dashboard." },
-  { title: "Cost history & trends", subtitle: "See how costs evolve over time." },
-  { title: "Alerts & savings", subtitle: "Know when spend spikes and where to cut waste." }
+const features = [
+  "30–180 day history",
+  "Multi-cluster & multi-account",
+  "Forecasting and anomaly detection",
+  "Rightsizing recommendations",
+  "Alerts via Slack/Teams/Email",
+  "Teams, orgs, RBAC, SSO"
 ];
 
 const ConnectCloudPage = () => {
   return (
-    <div className="mx-auto max-w-5xl space-y-8 px-4 py-10">
-      <section className="space-y-3 text-center">
-        <Badge variant="secondary" className="mx-auto w-fit">
-          Coming soon
-        </Badge>
-        <h1 className="text-3xl font-semibold">ClusterCost Cloud</h1>
-        <p className="text-muted-foreground">Centralize your cluster costs, history, and alerts in one place.</p>
-        <Button size="lg" asChild>
-          <a href="#">Join Cloud Waitlist</a>
-        </Button>
-      </section>
+    <div className="px-8 md:px-12 py-10 max-w-3xl">
+      <header>
+        <h1 className="text-2xl font-semibold">Connect to ClusterCost Cloud</h1>
+        <p className="mt-1 text-muted-foreground">
+          Unlock collaboration, automation, and cost intelligence across every cluster.
+        </p>
+      </header>
 
-      <section className="grid gap-4 md:grid-cols-3">
-        {benefits.map((benefit) => (
-          <Card key={benefit.title}>
-            <CardHeader>
-              <CardTitle className="text-base font-semibold">{benefit.title}</CardTitle>
-            </CardHeader>
-            <CardContent className="text-sm text-muted-foreground">{benefit.subtitle}</CardContent>
-          </Card>
-        ))}
-      </section>
-
-      <p className="text-center text-sm text-muted-foreground">
-        Open Source is perfect for individuals. Cloud is built for teams.
-      </p>
-
-      <p className="text-center text-xs text-muted-foreground">
-        We only use minimal metadata to power cost insights. No logs, no sensitive pod data.
-      </p>
+      <div className="border-t border-border/50 mt-4 pt-6">
+        <Card className="border border-border/50 bg-background rounded-xl">
+          <div className="p-6 md:p-8">
+            <h2 className="text-lg font-medium mb-4">Why upgrade</h2>
+            <ul className="space-y-2 list-disc pl-6 text-sm text-muted-foreground">
+              {features.map((feature) => (
+                <li key={feature}>{feature}</li>
+              ))}
+            </ul>
+            <div className="flex flex-wrap gap-3 mt-6">
+              <Button variant="outline" size="lg" className="px-8" asChild>
+                <a href="#">Learn more</a>
+              </Button>
+              <Button variant="secondary" size="lg" className="px-8" asChild>
+                <a href="#">Request access</a>
+              </Button>
+            </div>
+          </div>
+        </Card>
+      </div>
     </div>
   );
 };

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Sidebar from "./Sidebar";
 import TopBar from "./TopBar";
-import Skeleton from "../ui/skeleton";
+import { Skeleton } from "../ui/skeleton";
 import { fetchHealth, type HealthResponse } from "../../lib/api";
 
 const LayoutShell = ({ children }: { children: React.ReactNode }) => {

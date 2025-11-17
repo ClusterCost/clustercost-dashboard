@@ -10,13 +10,13 @@ import {
   relativeTimeFromIso,
   type Environment
 } from "../../lib/utils";
-import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
-import Skeleton from "../../components/ui/skeleton";
-import { Button } from "../../components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 import { CostByEnvironmentChart } from "../../charts/CostByEnvironmentChart";
-import { NamespaceDetailSheet } from "../../components/namespaces/NamespaceDetailSheet";
-import { Progress } from "../../components/ui/progress";
-import { EnvironmentBadge } from "../../components/environment/EnvironmentBadge";
+import { NamespaceDetailSheet } from "@/components/namespaces/NamespaceDetailSheet";
+import { Progress } from "@/components/ui/progress";
+import { EnvironmentBadge } from "@/components/environment/EnvironmentBadge";
 
 interface DerivedNamespace {
   name: string;
