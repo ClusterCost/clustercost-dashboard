@@ -230,17 +230,17 @@ const NamespacesPage = () => {
 
       <section className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <Card>
-          <CardHeader className="flex flex-wrap items-center justify-between gap-3">
+          <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <CardTitle>Namespaces</CardTitle>
               <p className="text-xs text-muted-foreground">Top 5 = {formatPercentage(topFiveShare, { fractionDigits: 0 })} of total</p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="w-full sm:max-w-xs">
               <Input
                 placeholder="Search namespaces"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                className="h-9 w-full max-w-xs"
+                className="h-9 w-full"
               />
             </div>
           </CardHeader>

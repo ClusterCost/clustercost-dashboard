@@ -199,17 +199,19 @@ const NodesPage = () => {
 
       <section className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <Card>
-          <CardHeader className="flex flex-wrap items-center justify-between gap-3">
+          <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <CardTitle>Nodes</CardTitle>
               <p className="text-sm text-muted-foreground">Sorted by monthly cost</p>
             </div>
-            <Input
-              placeholder="Search nodes"
-              value={search}
-              onChange={(event: ChangeEvent<HTMLInputElement>) => setSearch(event.target.value)}
-              className="h-9 w-full max-w-xs"
-            />
+            <div className="w-full sm:max-w-xs">
+              <Input
+                placeholder="Search nodes"
+                value={search}
+                onChange={(event: ChangeEvent<HTMLInputElement>) => setSearch(event.target.value)}
+                className="h-9 w-full"
+              />
+            </div>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="hidden lg:block">
