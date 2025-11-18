@@ -12,7 +12,6 @@ import {
 } from "../../lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
@@ -127,12 +126,7 @@ const ResourcesPage = () => {
           <h1 className="text-2xl font-semibold">Resources</h1>
           <p className="text-sm text-muted-foreground">See how your cluster uses CPU and memory.</p>
         </div>
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <span>Last updated {lastUpdated}</span>
-          <Button variant="outline" size="sm" onClick={refresh} disabled={loading}>
-            {loading ? "Refreshing…" : "Refresh"}
-          </Button>
-        </div>
+        <div className="text-sm text-muted-foreground">Last updated {lastUpdated}</div>
       </header>
 
       <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -187,7 +181,7 @@ const ResourcesPage = () => {
         </Card>
       </section>
 
-      {chartData.length > 0 && (
+      <section className="grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>
             <CardTitle>Usage vs requests</CardTitle>
@@ -195,49 +189,55 @@ const ResourcesPage = () => {
           </CardHeader>
           <CardContent>
             <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={chartData} layout="vertical" margin={{ left: 40, right: 16, top: 10, bottom: 10 }}>
-                  <XAxis type="number" hide />
-                  <YAxis type="category" dataKey="name" width={80} tick={{ fill: "#94a3b8", fontSize: 12 }} />
-                  <Legend />
-                  <Tooltip contentStyle={{ backgroundColor: "#0f172a", border: "1px solid #1e293b" }} />
-                  <Bar dataKey="Requested" fill="#475569" barSize={18} radius={[0, 4, 4, 0]} />
-                  <Bar dataKey="Used" fill="#38bdf8" barSize={18} radius={[0, 4, 4, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+              {chartData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={chartData} layout="vertical" margin={{ left: 40, right: 16, top: 10, bottom: 10 }}>
+                    <XAxis type="number" hide />
+                    <YAxis type="category" dataKey="name" width={80} tick={{ fill: "#94a3b8", fontSize: 12 }} />
+                    <Legend />
+                    <Tooltip contentStyle={{ backgroundColor: "#0f172a", border: "1px solid #1e293b" }} />
+                    <Bar dataKey="Requested" fill="#475569" barSize={18} radius={[0, 4, 4, 0]} />
+                    <Bar dataKey="Used" fill="#38bdf8" barSize={18} radius={[0, 4, 4, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                  No usage data yet.
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
-      )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Savings opportunities</CardTitle>
-          <p className="text-xs text-muted-foreground">Focus on these namespaces first</p>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {savings.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No obvious waste right now. Keep monitoring.</p>
-          ) : (
-            savings.map((item) => (
-              <button
-                key={item.namespace}
-                className="w-full rounded border border-border/60 p-3 text-left transition hover:border-primary/40"
-                onClick={() => setSelected(item)}
-              >
-                <div className="flex items-center justify-between text-sm">
-                  <span className="font-semibold">{item.namespace}</span>
-                  <span>{formatCurrency(item.estimatedMonthlyWasteCost)}</span>
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  CPU waste {formatWasteLabel(item.cpuWastePercent)} · Mem waste {formatWasteLabel(item.memoryWastePercent)}
-                </p>
-                <p className="text-xs text-muted-foreground">~{formatCurrency(item.estimatedMonthlyWasteCost)}/month potential</p>
-              </button>
-            ))
-          )}
-        </CardContent>
-      </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Savings opportunities</CardTitle>
+            <p className="text-xs text-muted-foreground">Focus on these namespaces first</p>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {savings.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No obvious waste right now. Keep monitoring.</p>
+            ) : (
+              savings.map((item) => (
+                <button
+                  key={item.namespace}
+                  className="w-full rounded border border-border/60 p-3 text-left transition hover:border-primary/40"
+                  onClick={() => setSelected(item)}
+                >
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="font-semibold">{item.namespace}</span>
+                    <span>{formatCurrency(item.estimatedMonthlyWasteCost)}</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    CPU waste {formatWasteLabel(item.cpuWastePercent)} · Mem waste {formatWasteLabel(item.memoryWastePercent)}
+                  </p>
+                  <p className="text-xs text-muted-foreground">~{formatCurrency(item.estimatedMonthlyWasteCost)}/month potential</p>
+                </button>
+              ))
+            )}
+          </CardContent>
+        </Card>
+      </section>
 
       <Sheet open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>
         <SheetContent className="w-full sm:max-w-md">

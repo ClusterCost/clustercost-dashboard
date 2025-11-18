@@ -228,8 +228,8 @@ const NamespacesPage = () => {
         </Card>
       </section>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <Card className="overflow-hidden">
+      <section className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+        <Card>
           <CardHeader className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <CardTitle>Namespaces</CardTitle>
@@ -240,50 +240,73 @@ const NamespacesPage = () => {
                 placeholder="Search namespaces"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                className="h-9 w-48"
+                className="h-9 w-full max-w-xs"
               />
             </div>
           </CardHeader>
-          <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Namespace</TableHead>
-                    <TableHead>Monthly cost</TableHead>
-                    <TableHead>CPU usage</TableHead>
-                    <TableHead>Memory usage</TableHead>
-                    <TableHead>Environment</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {sorted.map((ns) => (
-                    <TableRow
-                      key={ns.name}
-                      className="cursor-pointer"
-                      onClick={() => setSelected(ns)}
-                    >
-                      <TableCell className="font-medium">{ns.name}</TableCell>
-                      <TableCell className="whitespace-nowrap">{formatCurrency(ns.monthlyCost)}</TableCell>
-                      <TableCell className="w-48">
-                        <div className="flex items-center gap-2">
-                          <Progress value={ns.cpuUsagePercent} className="h-2 flex-1" />
-                          <span className="text-xs text-muted-foreground">{ns.cpuUsagePercent.toFixed(0)}%</span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="w-48">
-                        <div className="flex items-center gap-2">
-                          <Progress value={ns.memoryUsagePercent} className="h-2 flex-1" />
-                          <span className="text-xs text-muted-foreground">{ns.memoryUsagePercent.toFixed(0)}%</span>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <EnvironmentBadge environment={ns.environment} />
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+          <CardContent className="space-y-4">
+            <div className="hidden lg:block">
+              <div className="overflow-hidden rounded-md border">
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Namespace</TableHead>
+                        <TableHead>Monthly cost</TableHead>
+                        <TableHead>CPU usage</TableHead>
+                        <TableHead>Memory usage</TableHead>
+                        <TableHead>Environment</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {sorted.map((ns) => (
+                        <TableRow key={ns.name} className="cursor-pointer" onClick={() => setSelected(ns)}>
+                          <TableCell className="font-medium">{ns.name}</TableCell>
+                          <TableCell className="whitespace-nowrap">{formatCurrency(ns.monthlyCost)}</TableCell>
+                          <TableCell className="w-48">
+                            <div className="flex items-center gap-2">
+                              <Progress value={ns.cpuUsagePercent} className="h-2 flex-1" />
+                              <span className="text-xs text-muted-foreground">{ns.cpuUsagePercent.toFixed(0)}%</span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="w-48">
+                            <div className="flex items-center gap-2">
+                              <Progress value={ns.memoryUsagePercent} className="h-2 flex-1" />
+                              <span className="text-xs text-muted-foreground">{ns.memoryUsagePercent.toFixed(0)}%</span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <EnvironmentBadge environment={ns.environment} />
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            </div>
+            <div className="space-y-3 lg:hidden">
+              {sorted.map((ns) => (
+                <button
+                  key={ns.name}
+                  onClick={() => setSelected(ns)}
+                  className="w-full rounded-md border border-border/60 p-3 text-left"
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-semibold">{ns.name}</p>
+                      <p className="text-xs text-muted-foreground">{ns.environment}</p>
+                    </div>
+                    <span className="text-sm font-semibold">{formatCurrency(ns.monthlyCost)}</span>
+                  </div>
+                  <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                    <p>CPU {ns.cpuUsagePercent.toFixed(0)}%</p>
+                    <Progress value={ns.cpuUsagePercent} className="h-1.5" />
+                    <p className="mt-1">Memory {ns.memoryUsagePercent.toFixed(0)}%</p>
+                    <Progress value={ns.memoryUsagePercent} className="h-1.5" />
+                  </div>
+                </button>
+              ))}
             </div>
           </CardContent>
         </Card>
@@ -321,19 +344,20 @@ const NamespacesPage = () => {
               <CostByEnvironmentChart data={costByEnvironmentChart} />
             </CardContent>
           </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Top namespaces by cost</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {topFiveChart.length > 0 ? (
+                <TopNamespacesBarChart data={topFiveChart} />
+              ) : (
+                <p className="text-sm text-muted-foreground">We need namespace cost data before showing this chart.</p>
+              )}
+            </CardContent>
+          </Card>
         </div>
-      </div>
-
-      {topFiveChart.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Top namespaces by cost</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <TopNamespacesBarChart data={topFiveChart} />
-          </CardContent>
-        </Card>
-      )}
+      </section>
 
       <NamespaceDetailSheet open={!!selected} onOpenChange={(open) => !open && setSelected(null)} data={detailSnapshot} />
     </div>

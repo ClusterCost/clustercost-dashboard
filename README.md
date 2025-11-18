@@ -5,9 +5,10 @@ ClusterCost Dashboard is an open-source, local-first observability surface for r
 ## Features
 
 - Go backend with cached polling of ClusterCost agents.
-- React + Vite + Tailwind + shadcn/ui frontend focused on fast tables and charts.
+- React + Vite + Tailwind + shadcn/ui frontend with a collapsible sidebar, responsive cards, and mobile-friendly tables.
 - REST API: `/api/overview`, `/api/namespaces`, `/api/pods`, `/api/nodes`, `/api/workloads`, `/api/agents`, `/api/health`.
 - Multi-stage Dockerfile and Kubernetes manifests for quick deployment.
+- Modern chart utilities powered by shadcn blocks so every dashboard (Overview, Namespaces, Nodes, Resources) shares the same look & feel.
 
 ## Getting Started
 
@@ -55,6 +56,10 @@ npm run dev
 
 The Vite dev server proxies API calls to `localhost:8080`. When you run `npm run build`, the generated assets are automatically copied into `internal/static/dist` so the Go binary can embed the latest frontend.
 
+### Agent API
+
+The dashboard polls each configured agent via the `/agent/v1/*` endpoints for health & cost data. Review [AGENTS.md](./AGENTS.md) for payload details and tips on running agents locally.
+
 ### Docker
 
 ```bash
@@ -78,6 +83,7 @@ kubectl apply -f deployments/k8s/service.yaml
 - `internal`: configuration, agent client, cache, API handlers, static serving.
 - `web`: React frontend.
 - `deployments`: Docker and Kubernetes artifacts.
+- `AGENTS.md`: documentation for the expected agent API payloads.
 
 ## License
 
