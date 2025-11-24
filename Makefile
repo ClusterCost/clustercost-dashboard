@@ -1,6 +1,6 @@
 .PHONY: backend frontend build docker test clean dev-backend dev-frontend dev-bundle
 
-BACKEND_ENV ?= LISTEN_ADDR=:9090
+BACKEND_ENV ?= LISTEN_ADDR=:9010
 AGENT_URLS ?=
 BIN_DIR ?= $(PWD)/bin
 BINARY ?= $(BIN_DIR)/clustercost

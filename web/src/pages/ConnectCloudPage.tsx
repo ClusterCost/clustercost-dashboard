@@ -30,10 +30,10 @@ const ConnectCloudPage = () => {
           </ul>
           <div className="flex flex-wrap gap-3 mt-6">
             <Button variant="outline" size="lg" className="px-8" asChild>
-              <a href="#">Learn more</a>
+              <a href="https://clustercost.com/docs/saas/overview?ref=local_oss_dashboard">Learn more</a>
             </Button>
             <Button variant="secondary" size="lg" className="px-8" asChild>
-              <a href="#">Request access</a>
+              <a href="https://clustercost.com/?ref=local_oss_dashboard#waitlist">Request access</a>
             </Button>
           </div>
         </div>
