@@ -5,6 +5,9 @@ AGENT_URLS ?=
 BIN_DIR ?= $(PWD)/bin
 BINARY ?= $(BIN_DIR)/clustercost
 
+proto:
+	protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative internal/proto/agent/v1/agent.proto
+
 dev-backend:
 	$(BACKEND_ENV) AGENT_URLS=$(AGENT_URLS) go run ./cmd/dashboard
 
@@ -33,3 +36,6 @@ clean:
 	rm -rf .gocache web/node_modules web/dist $(BIN_DIR)
 	rm -rf internal/static/dist/*
 	touch internal/static/dist/.gitkeep
+
+upload-latest:
+	docker buildx build --platform linux/amd64,linux/arm64 -t jesuspaz/clustercost-dashboard:latest --push --build-arg VERSION=$(VERSION) .

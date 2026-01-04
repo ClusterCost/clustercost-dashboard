@@ -16,11 +16,14 @@ type AgentConfig struct {
 	Name    string `yaml:"name"`
 	BaseURL string `yaml:"baseUrl"`
 	Type    string `yaml:"type"`
+	Token   string `yaml:"token"`
 }
 
 // Config contains runtime settings for the dashboard backend.
 type Config struct {
 	ListenAddr              string        `yaml:"listenAddr"`
+	GrpcAddr                string        `yaml:"grpcAddr"`
+	DefaultAgentToken       string        `yaml:"defaultAgentToken"`
 	PollInterval            time.Duration `yaml:"pollInterval"`
 	Agents                  []AgentConfig `yaml:"agents"`
 	RecommendedAgentVersion string        `yaml:"recommendedAgentVersion"`
@@ -30,6 +33,7 @@ type Config struct {
 func Default() Config {
 	return Config{
 		ListenAddr:   ":9090",
+		GrpcAddr:     ":9091",
 		PollInterval: 30 * time.Second,
 		Agents:       []AgentConfig{},
 	}
@@ -41,6 +45,14 @@ func Load() (Config, error) {
 
 	if listen := os.Getenv("LISTEN_ADDR"); listen != "" {
 		cfg.ListenAddr = listen
+	}
+
+	if grpcAddr := os.Getenv("GRPC_ADDR"); grpcAddr != "" {
+		cfg.GrpcAddr = grpcAddr
+	}
+
+	if defaultToken := os.Getenv("DEFAULT_AGENT_TOKEN"); defaultToken != "" {
+		cfg.DefaultAgentToken = defaultToken
 	}
 
 	if interval := os.Getenv("POLL_INTERVAL"); interval != "" {
@@ -110,6 +122,12 @@ func fromFile(path string) (Config, error) {
 func merge(dst *Config, src Config) {
 	if src.ListenAddr != "" {
 		dst.ListenAddr = src.ListenAddr
+	}
+	if src.GrpcAddr != "" {
+		dst.GrpcAddr = src.GrpcAddr
+	}
+	if src.DefaultAgentToken != "" {
+		dst.DefaultAgentToken = src.DefaultAgentToken
 	}
 	if src.PollInterval != 0 {
 		dst.PollInterval = src.PollInterval

@@ -13,6 +13,7 @@ import (
 	"github.com/clustercost/clustercost-dashboard/internal/agents"
 	"github.com/clustercost/clustercost-dashboard/internal/api"
 	"github.com/clustercost/clustercost-dashboard/internal/config"
+	ccgrpc "github.com/clustercost/clustercost-dashboard/internal/grpc"
 	"github.com/clustercost/clustercost-dashboard/internal/logging"
 	"github.com/clustercost/clustercost-dashboard/internal/store"
 )
@@ -52,10 +53,19 @@ func main() {
 		Handler: api.NewRouter(s),
 	}
 
+	grpcSrv := ccgrpc.NewServer(s, cfg)
+	go func() {
+		logger.Printf("gRPC listening on %s", cfg.GrpcAddr)
+		if err := grpcSrv.ListenAndServe(cfg.GrpcAddr); err != nil {
+			logger.Fatalf("grpc server error: %v", err)
+		}
+	}()
+
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+		grpcSrv.Stop()
 		_ = srv.Shutdown(shutdownCtx)
 	}()
 

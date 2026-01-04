@@ -13,3 +13,5 @@ internal/static/dist/*
 .DS_Store
 .vscode/
 .idea/
+
+dashboard

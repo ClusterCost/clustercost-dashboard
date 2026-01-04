@@ -1,0 +1,78 @@
+syntax = "proto3";
+
+package agent.v1;
+
+option go_package = "github.com/clustercost/clustercost-dashboard/internal/proto/agent/v1;agentv1";
+
+service Collector {
+  rpc Report(ReportRequest) returns (ReportResponse);
+  rpc ReportBatch(ReportBatchRequest) returns (ReportResponse);
+}
+
+message ReportRequest {
+  string cluster_id = 1;
+  string cluster_name = 2;
+  string node_name = 3;
+  string agent_id = 4;
+  string version = 5;
+  int64 timestamp_seconds = 6;
+  Snapshot snapshot = 7;
+}
+
+message ReportBatchRequest {
+  repeated ReportRequest reports = 1;
+}
+
+message ReportResponse {
+  bool accepted = 1;
+  string error_message = 2;
+}
+
+message Snapshot {
+  int64 timestamp_seconds = 1;
+  repeated NamespaceCostRecord namespaces = 2;
+  repeated NodeCostRecord nodes = 3;
+  ResourceSnapshot resources = 4;
+  NetworkSnapshot network = 5;
+}
+
+// Internal definitions for the records (assuming assumed fields based on existing models)
+
+message NamespaceCostRecord {
+  string namespace = 1;
+  string environment = 2;
+  double hourly_cost = 3;
+  int64 cpu_request_milli = 4;
+  int64 memory_request_bytes = 5;
+  int64 cpu_usage_milli = 6;
+  int64 memory_usage_bytes = 7;
+  map<string, string> labels = 8;
+  int32 pod_count = 9;
+}
+
+message NodeCostRecord {
+  string node_name = 1;
+  double hourly_cost = 2;
+  double cpu_usage_percent = 3;
+  double memory_usage_percent = 4;
+  int64 cpu_allocatable_milli = 5;
+  int64 memory_allocatable_bytes = 6;
+  int32 pod_count = 7;
+  string status = 8;
+  bool is_under_pressure = 9;
+  string instance_type = 10;
+  map<string, string> labels = 11;
+  repeated string taints = 12;
+}
+
+message ResourceSnapshot {
+  int64 cpu_usage_milli_total = 1;
+  int64 cpu_request_milli_total = 2;
+  int64 memory_usage_bytes_total = 3;
+  int64 memory_request_bytes_total = 4;
+  double total_node_hourly_cost = 5;
+}
+
+message NetworkSnapshot {
+  // Leaving empty for now as it's not fully defined in prompt, but slot exists.
+}

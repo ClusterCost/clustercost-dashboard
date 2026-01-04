@@ -552,14 +552,28 @@ func (s *Store) Agents() []AgentInfo {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	result := make([]AgentInfo, 0, len(s.agentConfigs))
+	// Use a map to deduplicate agents found in config vs snapshots
+	agentMap := make(map[string]AgentInfo)
+
+	// Add configured agents
 	for name, cfg := range s.agentConfigs {
-		snapshot := s.snapshots[name]
-		info := AgentInfo{
+		agentMap[name] = AgentInfo{
 			Name:    name,
 			BaseURL: cfg.BaseURL,
 			Status:  "unknown",
 		}
+	}
+
+	// Add dynamic agents from snapshots and update status
+	for name, snapshot := range s.snapshots {
+		info, exists := agentMap[name]
+		if !exists {
+			info = AgentInfo{
+				Name:   name,
+				Status: "unknown",
+			}
+		}
+
 		if snapshot != nil {
 			if snapshot.LastError != "" {
 				info.Status = "error"
@@ -571,8 +585,14 @@ func (s *Store) Agents() []AgentInfo {
 			}
 			info.LastScrapeTime = snapshot.LastScrape
 		}
+		agentMap[name] = info
+	}
+
+	result := make([]AgentInfo, 0, len(agentMap))
+	for _, info := range agentMap {
 		result = append(result, info)
 	}
+
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].Name < result[j].Name
 	})
