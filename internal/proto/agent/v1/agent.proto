@@ -2,63 +2,84 @@ syntax = "proto3";
 
 package agent.v1;
 
-option go_package = "github.com/clustercost/backend/proto/agent/v1";
+option go_package = "github.com/clustercost/backend/proto/agent/v1;agentv1";
 
-service AgentService {
-  rpc Report(stream ReportRequest) returns (ReportResponse);
+service Collector {
+  // Report sends a batch of metrics from the agent to the aggregator.
+  rpc Report(ReportRequest) returns (ReportResponse);
 }
 
 message ReportRequest {
-  string cluster_id = 1;
-  string cluster_name = 2;
+  string agent_id = 1;
+  string cluster_id = 2;
   string node_name = 3;
   string availability_zone = 4;
-  string agent_id = 5;
-  Snapshot snapshot = 6;
+  int64 timestamp_seconds = 5;
+
+  repeated PodMetric pods = 6;
 }
 
 message ReportResponse {
   bool accepted = 1;
-}
-
-message Snapshot {
-  repeated PodMetric pods = 1;
-  // Nodes, Namespaces, Deployments metadata if you need them for enrichment
+  string error_message = 2;
 }
 
 message PodMetric {
-  string namespace = 1;
-  string pod = 2;
-  map<string, string> labels = 3;
+  // Metadata Context
+  string pod_uid = 1;
+  string container_id = 2;
+  uint32 pid_tgid = 3;
   
-  CpuMetrics cpu_metrics = 4;
-  MemoryMetrics memory_metrics = 5;
-  NetworkMetrics network_metrics = 6;
-  StorageMetrics storage_metrics = 7;
+  string namespace = 4;
+  string pod_name = 5;
+
+  // Compute Performance
+  CpuMetrics cpu = 6;
+  MemoryMetrics memory = 7;
+
+  // Cost-Aware Network
+  NetworkMetrics network = 8;
+
+  // Storage I/O
+  StorageMetrics storage = 9;
 }
 
 message CpuMetrics {
+  // Total nanoseconds in user space
   uint64 usage_user_ns = 1;
+  // Total nanoseconds in kernel space
   uint64 usage_kernel_ns = 2;
+  // Total run_delay (throttling) in nanoseconds
   uint64 throttling_ns = 3;
 }
 
 message MemoryMetrics {
+  // Resident Set Size (bytes)
   uint64 rss_bytes = 1;
-  uint64 page_faults = 2;
+  // Major page faults
+  uint64 page_faults_major = 2;
 }
 
 message NetworkMetrics {
+  // Throughput
   uint64 bytes_sent = 1;
-  uint64 bytes_recv = 2;
-  uint64 egress_public_bytes = 3;   // $$$ High Cost
-  uint64 egress_cross_az_bytes = 4; // $$ Medium Cost
-  uint64 egress_internal_bytes = 5; // $ Low/Free
+  uint64 bytes_received = 2;
+
+  // Traffic Categorization (Egress Analyzer)
+  uint64 egress_public_bytes = 3;
+  uint64 egress_cross_az_bytes = 4;
+  uint64 egress_internal_bytes = 5;
 }
 
 message StorageMetrics {
+  // Throughput
   uint64 read_bytes = 1;
   uint64 write_bytes = 2;
+  
+  // IOPS
   uint64 read_ops = 3;
   uint64 write_ops = 4;
+
+  // Latency
+  uint64 total_latency_ns = 5; 
 }

@@ -25,7 +25,7 @@ func NewServer(cfg config.Config, ingestor ReportIngestor) *Server {
 	gsrv := grpc.NewServer(opts...)
 
 	collector := NewCollector(ingestor)
-	agentv1.RegisterAgentServiceServer(gsrv, collector)
+	agentv1.RegisterCollectorServer(gsrv, collector)
 
 	// Register reflection service on gRPC server (useful for grpcurl).
 	reflection.Register(gsrv)

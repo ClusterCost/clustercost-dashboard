@@ -17,21 +17,19 @@ func newTestStore() *Store {
 func TestClusterMetadataReturnsLatestSnapshot(t *testing.T) {
 	s := newTestStore()
 	s.Update("test-agent", &agentv1.ReportRequest{
-		AgentId:          "test-agent",
-		ClusterId:        "cluster-1",
-		ClusterName:      "Cluster One",
-		AvailabilityZone: "us-east-1", // Using AZ as Region proxy
-		Snapshot: &agentv1.Snapshot{
-			Pods: []*agentv1.PodMetric{},
-		},
+		AgentId:   "test-agent",
+		ClusterId: "cluster-1",
+		// ClusterName removed
+		AvailabilityZone: "us-east-1",            // Using AZ as Region proxy
+		Pods:             []*agentv1.PodMetric{}, // Changed from Snapshot
 	})
 
 	meta, err := s.ClusterMetadata()
 	if err != nil {
 		t.Fatalf("ClusterMetadata returned error: %v", err)
 	}
-	if meta.Name != "Cluster One" {
-		t.Fatalf("expected cluster name to be preserved, got %q", meta.Name)
+	if meta.Name != "Cluster" {
+		t.Fatalf("expected cluster name Cluster, got %q", meta.Name)
 	}
 	if meta.Type != "k8s" {
 		t.Fatalf("expected cluster type k8s, got %q", meta.Type)
@@ -53,16 +51,13 @@ func TestAgentStatusConnectedWhenDataFresh(t *testing.T) {
 	s.Update("test-agent", &agentv1.ReportRequest{
 		AgentId:          "test-agent",
 		ClusterId:        "cluster-2",
-		ClusterName:      "Cluster Two",
 		NodeName:         "node-1",
 		AvailabilityZone: "us-west-2",
-		Snapshot: &agentv1.Snapshot{
-			Pods: []*agentv1.PodMetric{
-				{
-					Namespace:     "default",
-					Pod:           "pod-1",
-					MemoryMetrics: &agentv1.MemoryMetrics{RssBytes: 1024 * 1024 * 100},
-				},
+		Pods: []*agentv1.PodMetric{
+			{
+				Namespace: "default",
+				PodName:   "pod-1",
+				Memory:    &agentv1.MemoryMetrics{RssBytes: 1024 * 1024 * 100},
 			},
 		},
 	})
@@ -74,8 +69,8 @@ func TestAgentStatusConnectedWhenDataFresh(t *testing.T) {
 	if status.Status != "connected" {
 		t.Fatalf("expected status connected, got %q", status.Status)
 	}
-	if status.ClusterName != "Cluster Two" {
-		t.Fatalf("expected cluster name Cluster Two, got %q", status.ClusterName)
+	if status.ClusterName != "Cluster" {
+		t.Fatalf("expected cluster name Cluster, got %q", status.ClusterName)
 	}
 	if status.ClusterType != "k8s" {
 		t.Fatalf("expected cluster type k8s, got %q", status.ClusterType)

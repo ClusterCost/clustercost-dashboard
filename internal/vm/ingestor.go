@@ -245,79 +245,67 @@ func (i *Ingestor) appendReport(buf *bytes.Buffer, env reportEnvelope) {
 	}
 
 	meta := i.agentMeta[agentName]
-	base := baseLabels(agentName, env.req.ClusterId, env.req.ClusterName, meta)
+	base := baseLabels(agentName, env.req.ClusterId, "", meta) // ClusterName is not in V2 proto?
+	// Wait, user proto: cluster_id = 2. No cluster_name.
+	// We'll leave clusterName empty or rely on agentMeta?
+	// The proto provided has: agent_id, cluster_id, node_name, availability_zone, timestamp_seconds, pods.
+	// No cluster_name.
 
 	// Report agent up
 	writeSample(buf, "clustercost_agent_up", base, "1", tsMillis)
 
-	if req.Snapshot == nil {
-		return
-	}
-
 	// 2. Process Pods & Aggregate Namespace Data
 	type nsAgg struct {
-		hourlyCost         float64
-		podCount           int64
-		cpuRequestMilli    int64
-		cpuUsageMilli      int64
-		memoryRequestBytes int64
-		memoryUsageBytes   int64
+		hourlyCost      float64
+		podCount        int64
+		cpuUsageSeconds float64
+		memoryRssBytes  int64
 	}
-	// map[namespace]map[environment]*nsAgg
-	nsMap := make(map[string]map[string]*nsAgg)
+	// map[namespace]*nsAgg
+	nsMap := make(map[string]*nsAgg)
 
-	for _, pod := range req.Snapshot.Pods {
+	for _, pod := range req.Pods {
 		if pod == nil {
 			continue
 		}
 
-		environment := pod.Labels["environment"]
-		if environment == "" {
-			environment = "unknown"
-		}
-		// v2 PodMetric has simple labels map.
+		// Labels are removed in V2 proto provided by user.
+		// We can't determine environment or owners from labels anymore.
+		// We will set environment to "unknown" or "production" default?
+		environment := "production" // Default assumption without labels
 
 		nodeName := req.NodeName
 
 		podLabels := appendLabels(base,
 			label{"namespace", pod.Namespace},
-			label{"pod", pod.Pod},
+			label{"pod", pod.PodName},
 			label{"node", nodeName},
 			label{"environment", environment},
 		)
-		// Owner references are not in v2 top-level, assumingly maybe in labels or missing.
-		// We skip them for now.
-
-		// Add custom labels
-		for k, v := range pod.Labels {
-			if k == "app" || k == "component" || k == "service" {
-				podLabels = append(podLabels, label{k, v})
-			}
-		}
 
 		// Calculate Totals and Costs
 		// CPU
 		cpuSeconds := float64(0)
-		if pod.CpuMetrics != nil {
-			// v2: usage_user_ns + usage_kernel_ns
-			ns := pod.CpuMetrics.UsageUserNs + pod.CpuMetrics.UsageKernelNs
+		if pod.Cpu != nil {
+			// usage_user_ns + usage_kernel_ns
+			ns := pod.Cpu.UsageUserNs + pod.Cpu.UsageKernelNs
 			cpuSeconds = float64(ns) / 1e9
 		}
 
 		// Memory
 		memBytes := int64(0)
-		if pod.MemoryMetrics != nil {
-			memBytes = int64(pod.MemoryMetrics.RssBytes)
+		if pod.Memory != nil {
+			memBytes = int64(pod.Memory.RssBytes)
 		}
 
 		// Network
 		netTx := int64(0)
 		netRx := int64(0)
 		egressPublic := int64(0)
-		if pod.NetworkMetrics != nil {
-			netTx = int64(pod.NetworkMetrics.BytesSent)
-			netRx = int64(pod.NetworkMetrics.BytesRecv)
-			egressPublic = int64(pod.NetworkMetrics.EgressPublicBytes)
+		if pod.Network != nil {
+			netTx = int64(pod.Network.BytesSent)
+			netRx = int64(pod.Network.BytesReceived)
+			egressPublic = int64(pod.Network.EgressPublicBytes)
 		}
 
 		writeSample(buf, "clustercost_pod_cpu_usage_seconds_total", podLabels, formatFloat(cpuSeconds), tsMillis)
@@ -327,33 +315,25 @@ func (i *Ingestor) appendReport(buf *bytes.Buffer, env reportEnvelope) {
 		writeSample(buf, "clustercost_pod_network_egress_public_bytes_total", podLabels, formatInt(egressPublic), tsMillis)
 
 		// Aggregate for Namespace
-		// We can still aggregate usage for namespace if we want, but "Hourly Cost" is hard without rate.
-		// We'll skip aggregated cost for now and focus on raw metrics.
-		// Or we can just sum the raw counters for namespace.
 		if nsMap[pod.Namespace] == nil {
-			nsMap[pod.Namespace] = make(map[string]*nsAgg)
+			nsMap[pod.Namespace] = &nsAgg{}
 		}
-		if nsMap[pod.Namespace][environment] == nil {
-			nsMap[pod.Namespace][environment] = &nsAgg{}
-		}
-		agg := nsMap[pod.Namespace][environment]
+		agg := nsMap[pod.Namespace]
 		agg.podCount++
-		// agg.cpuUsageMilli += ??? We have seconds total.
+		agg.cpuUsageSeconds += cpuSeconds
+		agg.memoryRssBytes += memBytes
 	}
 
 	// 3. Emit Aggregated Namespace Metrics
-	for ns, envs := range nsMap {
-		for env, agg := range envs {
-			nsLabels := appendLabels(base,
-				label{"namespace", ns},
-				label{"environment", env},
-			)
-			writeSample(buf, "clustercost_namespace_pod_count", nsLabels, formatInt(agg.podCount), tsMillis)
-		}
+	for ns, agg := range nsMap {
+		nsLabels := appendLabels(base,
+			label{"namespace", ns},
+			// label{"environment", ...} // Implicit aggregation?
+		)
+		writeSample(buf, "clustercost_namespace_pod_count", nsLabels, formatInt(agg.podCount), tsMillis)
+		writeSample(buf, "clustercost_namespace_cpu_usage_seconds_total", nsLabels, formatFloat(agg.cpuUsageSeconds), tsMillis)
+		writeSample(buf, "clustercost_namespace_memory_rss_bytes_total", nsLabels, formatInt(agg.memoryRssBytes), tsMillis)
 	}
-
-	// 4. Resources Snapshot - Removed in V2.
-
 }
 
 func buildIngestURL(baseURL, ingestPath string) (string, error) {

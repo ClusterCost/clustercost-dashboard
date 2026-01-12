@@ -4,7 +4,7 @@
 // 	protoc        v4.25.3
 // source: internal/proto/agent/v1/agent.proto
 
-package v1
+package agentv1
 
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -23,12 +23,12 @@ const (
 
 type ReportRequest struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
-	ClusterId        string                 `protobuf:"bytes,1,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
-	ClusterName      string                 `protobuf:"bytes,2,opt,name=cluster_name,json=clusterName,proto3" json:"cluster_name,omitempty"`
+	AgentId          string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	ClusterId        string                 `protobuf:"bytes,2,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
 	NodeName         string                 `protobuf:"bytes,3,opt,name=node_name,json=nodeName,proto3" json:"node_name,omitempty"`
 	AvailabilityZone string                 `protobuf:"bytes,4,opt,name=availability_zone,json=availabilityZone,proto3" json:"availability_zone,omitempty"`
-	AgentId          string                 `protobuf:"bytes,5,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
-	Snapshot         *Snapshot              `protobuf:"bytes,6,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
+	TimestampSeconds int64                  `protobuf:"varint,5,opt,name=timestamp_seconds,json=timestampSeconds,proto3" json:"timestamp_seconds,omitempty"`
+	Pods             []*PodMetric           `protobuf:"bytes,6,rep,name=pods,proto3" json:"pods,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -63,16 +63,16 @@ func (*ReportRequest) Descriptor() ([]byte, []int) {
 	return file_internal_proto_agent_v1_agent_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *ReportRequest) GetClusterId() string {
+func (x *ReportRequest) GetAgentId() string {
 	if x != nil {
-		return x.ClusterId
+		return x.AgentId
 	}
 	return ""
 }
 
-func (x *ReportRequest) GetClusterName() string {
+func (x *ReportRequest) GetClusterId() string {
 	if x != nil {
-		return x.ClusterName
+		return x.ClusterId
 	}
 	return ""
 }
@@ -91,16 +91,16 @@ func (x *ReportRequest) GetAvailabilityZone() string {
 	return ""
 }
 
-func (x *ReportRequest) GetAgentId() string {
+func (x *ReportRequest) GetTimestampSeconds() int64 {
 	if x != nil {
-		return x.AgentId
+		return x.TimestampSeconds
 	}
-	return ""
+	return 0
 }
 
-func (x *ReportRequest) GetSnapshot() *Snapshot {
+func (x *ReportRequest) GetPods() []*PodMetric {
 	if x != nil {
-		return x.Snapshot
+		return x.Pods
 	}
 	return nil
 }
@@ -108,6 +108,7 @@ func (x *ReportRequest) GetSnapshot() *Snapshot {
 type ReportResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Accepted      bool                   `protobuf:"varint,1,opt,name=accepted,proto3" json:"accepted,omitempty"`
+	ErrorMessage  string                 `protobuf:"bytes,2,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -149,66 +150,35 @@ func (x *ReportResponse) GetAccepted() bool {
 	return false
 }
 
-type Snapshot struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Pods          []*PodMetric           `protobuf:"bytes,1,rep,name=pods,proto3" json:"pods,omitempty"` // Nodes, Namespaces, Deployments metadata if you need them for enrichment
+func (x *ReportResponse) GetErrorMessage() string {
+	if x != nil {
+		return x.ErrorMessage
+	}
+	return ""
+}
+
+type PodMetric struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Metadata Context
+	PodUid      string `protobuf:"bytes,1,opt,name=pod_uid,json=podUid,proto3" json:"pod_uid,omitempty"`
+	ContainerId string `protobuf:"bytes,2,opt,name=container_id,json=containerId,proto3" json:"container_id,omitempty"`
+	PidTgid     uint32 `protobuf:"varint,3,opt,name=pid_tgid,json=pidTgid,proto3" json:"pid_tgid,omitempty"`
+	Namespace   string `protobuf:"bytes,4,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	PodName     string `protobuf:"bytes,5,opt,name=pod_name,json=podName,proto3" json:"pod_name,omitempty"`
+	// Compute Performance
+	Cpu    *CpuMetrics    `protobuf:"bytes,6,opt,name=cpu,proto3" json:"cpu,omitempty"`
+	Memory *MemoryMetrics `protobuf:"bytes,7,opt,name=memory,proto3" json:"memory,omitempty"`
+	// Cost-Aware Network
+	Network *NetworkMetrics `protobuf:"bytes,8,opt,name=network,proto3" json:"network,omitempty"`
+	// Storage I/O
+	Storage       *StorageMetrics `protobuf:"bytes,9,opt,name=storage,proto3" json:"storage,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *Snapshot) Reset() {
-	*x = Snapshot{}
-	mi := &file_internal_proto_agent_v1_agent_proto_msgTypes[2]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *Snapshot) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*Snapshot) ProtoMessage() {}
-
-func (x *Snapshot) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_agent_v1_agent_proto_msgTypes[2]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use Snapshot.ProtoReflect.Descriptor instead.
-func (*Snapshot) Descriptor() ([]byte, []int) {
-	return file_internal_proto_agent_v1_agent_proto_rawDescGZIP(), []int{2}
-}
-
-func (x *Snapshot) GetPods() []*PodMetric {
-	if x != nil {
-		return x.Pods
-	}
-	return nil
-}
-
-type PodMetric struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	Namespace      string                 `protobuf:"bytes,1,opt,name=namespace,proto3" json:"namespace,omitempty"`
-	Pod            string                 `protobuf:"bytes,2,opt,name=pod,proto3" json:"pod,omitempty"`
-	Labels         map[string]string      `protobuf:"bytes,3,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	CpuMetrics     *CpuMetrics            `protobuf:"bytes,4,opt,name=cpu_metrics,json=cpuMetrics,proto3" json:"cpu_metrics,omitempty"`
-	MemoryMetrics  *MemoryMetrics         `protobuf:"bytes,5,opt,name=memory_metrics,json=memoryMetrics,proto3" json:"memory_metrics,omitempty"`
-	NetworkMetrics *NetworkMetrics        `protobuf:"bytes,6,opt,name=network_metrics,json=networkMetrics,proto3" json:"network_metrics,omitempty"`
-	StorageMetrics *StorageMetrics        `protobuf:"bytes,7,opt,name=storage_metrics,json=storageMetrics,proto3" json:"storage_metrics,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
-}
-
 func (x *PodMetric) Reset() {
 	*x = PodMetric{}
-	mi := &file_internal_proto_agent_v1_agent_proto_msgTypes[3]
+	mi := &file_internal_proto_agent_v1_agent_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -220,7 +190,7 @@ func (x *PodMetric) String() string {
 func (*PodMetric) ProtoMessage() {}
 
 func (x *PodMetric) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_agent_v1_agent_proto_msgTypes[3]
+	mi := &file_internal_proto_agent_v1_agent_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -233,7 +203,28 @@ func (x *PodMetric) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PodMetric.ProtoReflect.Descriptor instead.
 func (*PodMetric) Descriptor() ([]byte, []int) {
-	return file_internal_proto_agent_v1_agent_proto_rawDescGZIP(), []int{3}
+	return file_internal_proto_agent_v1_agent_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *PodMetric) GetPodUid() string {
+	if x != nil {
+		return x.PodUid
+	}
+	return ""
+}
+
+func (x *PodMetric) GetContainerId() string {
+	if x != nil {
+		return x.ContainerId
+	}
+	return ""
+}
+
+func (x *PodMetric) GetPidTgid() uint32 {
+	if x != nil {
+		return x.PidTgid
+	}
+	return 0
 }
 
 func (x *PodMetric) GetNamespace() string {
@@ -243,60 +234,56 @@ func (x *PodMetric) GetNamespace() string {
 	return ""
 }
 
-func (x *PodMetric) GetPod() string {
+func (x *PodMetric) GetPodName() string {
 	if x != nil {
-		return x.Pod
+		return x.PodName
 	}
 	return ""
 }
 
-func (x *PodMetric) GetLabels() map[string]string {
+func (x *PodMetric) GetCpu() *CpuMetrics {
 	if x != nil {
-		return x.Labels
+		return x.Cpu
 	}
 	return nil
 }
 
-func (x *PodMetric) GetCpuMetrics() *CpuMetrics {
+func (x *PodMetric) GetMemory() *MemoryMetrics {
 	if x != nil {
-		return x.CpuMetrics
+		return x.Memory
 	}
 	return nil
 }
 
-func (x *PodMetric) GetMemoryMetrics() *MemoryMetrics {
+func (x *PodMetric) GetNetwork() *NetworkMetrics {
 	if x != nil {
-		return x.MemoryMetrics
+		return x.Network
 	}
 	return nil
 }
 
-func (x *PodMetric) GetNetworkMetrics() *NetworkMetrics {
+func (x *PodMetric) GetStorage() *StorageMetrics {
 	if x != nil {
-		return x.NetworkMetrics
-	}
-	return nil
-}
-
-func (x *PodMetric) GetStorageMetrics() *StorageMetrics {
-	if x != nil {
-		return x.StorageMetrics
+		return x.Storage
 	}
 	return nil
 }
 
 type CpuMetrics struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UsageUserNs   uint64                 `protobuf:"varint,1,opt,name=usage_user_ns,json=usageUserNs,proto3" json:"usage_user_ns,omitempty"`
-	UsageKernelNs uint64                 `protobuf:"varint,2,opt,name=usage_kernel_ns,json=usageKernelNs,proto3" json:"usage_kernel_ns,omitempty"`
-	ThrottlingNs  uint64                 `protobuf:"varint,3,opt,name=throttling_ns,json=throttlingNs,proto3" json:"throttling_ns,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Total nanoseconds in user space
+	UsageUserNs uint64 `protobuf:"varint,1,opt,name=usage_user_ns,json=usageUserNs,proto3" json:"usage_user_ns,omitempty"`
+	// Total nanoseconds in kernel space
+	UsageKernelNs uint64 `protobuf:"varint,2,opt,name=usage_kernel_ns,json=usageKernelNs,proto3" json:"usage_kernel_ns,omitempty"`
+	// Total run_delay (throttling) in nanoseconds
+	ThrottlingNs  uint64 `protobuf:"varint,3,opt,name=throttling_ns,json=throttlingNs,proto3" json:"throttling_ns,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *CpuMetrics) Reset() {
 	*x = CpuMetrics{}
-	mi := &file_internal_proto_agent_v1_agent_proto_msgTypes[4]
+	mi := &file_internal_proto_agent_v1_agent_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -308,7 +295,7 @@ func (x *CpuMetrics) String() string {
 func (*CpuMetrics) ProtoMessage() {}
 
 func (x *CpuMetrics) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_agent_v1_agent_proto_msgTypes[4]
+	mi := &file_internal_proto_agent_v1_agent_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -321,7 +308,7 @@ func (x *CpuMetrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CpuMetrics.ProtoReflect.Descriptor instead.
 func (*CpuMetrics) Descriptor() ([]byte, []int) {
-	return file_internal_proto_agent_v1_agent_proto_rawDescGZIP(), []int{4}
+	return file_internal_proto_agent_v1_agent_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *CpuMetrics) GetUsageUserNs() uint64 {
@@ -346,16 +333,18 @@ func (x *CpuMetrics) GetThrottlingNs() uint64 {
 }
 
 type MemoryMetrics struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RssBytes      uint64                 `protobuf:"varint,1,opt,name=rss_bytes,json=rssBytes,proto3" json:"rss_bytes,omitempty"`
-	PageFaults    uint64                 `protobuf:"varint,2,opt,name=page_faults,json=pageFaults,proto3" json:"page_faults,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Resident Set Size (bytes)
+	RssBytes uint64 `protobuf:"varint,1,opt,name=rss_bytes,json=rssBytes,proto3" json:"rss_bytes,omitempty"`
+	// Major page faults
+	PageFaultsMajor uint64 `protobuf:"varint,2,opt,name=page_faults_major,json=pageFaultsMajor,proto3" json:"page_faults_major,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *MemoryMetrics) Reset() {
 	*x = MemoryMetrics{}
-	mi := &file_internal_proto_agent_v1_agent_proto_msgTypes[5]
+	mi := &file_internal_proto_agent_v1_agent_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -367,7 +356,7 @@ func (x *MemoryMetrics) String() string {
 func (*MemoryMetrics) ProtoMessage() {}
 
 func (x *MemoryMetrics) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_agent_v1_agent_proto_msgTypes[5]
+	mi := &file_internal_proto_agent_v1_agent_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -380,7 +369,7 @@ func (x *MemoryMetrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MemoryMetrics.ProtoReflect.Descriptor instead.
 func (*MemoryMetrics) Descriptor() ([]byte, []int) {
-	return file_internal_proto_agent_v1_agent_proto_rawDescGZIP(), []int{5}
+	return file_internal_proto_agent_v1_agent_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *MemoryMetrics) GetRssBytes() uint64 {
@@ -390,27 +379,29 @@ func (x *MemoryMetrics) GetRssBytes() uint64 {
 	return 0
 }
 
-func (x *MemoryMetrics) GetPageFaults() uint64 {
+func (x *MemoryMetrics) GetPageFaultsMajor() uint64 {
 	if x != nil {
-		return x.PageFaults
+		return x.PageFaultsMajor
 	}
 	return 0
 }
 
 type NetworkMetrics struct {
-	state               protoimpl.MessageState `protogen:"open.v1"`
-	BytesSent           uint64                 `protobuf:"varint,1,opt,name=bytes_sent,json=bytesSent,proto3" json:"bytes_sent,omitempty"`
-	BytesRecv           uint64                 `protobuf:"varint,2,opt,name=bytes_recv,json=bytesRecv,proto3" json:"bytes_recv,omitempty"`
-	EgressPublicBytes   uint64                 `protobuf:"varint,3,opt,name=egress_public_bytes,json=egressPublicBytes,proto3" json:"egress_public_bytes,omitempty"`       // $$$ High Cost
-	EgressCrossAzBytes  uint64                 `protobuf:"varint,4,opt,name=egress_cross_az_bytes,json=egressCrossAzBytes,proto3" json:"egress_cross_az_bytes,omitempty"`  // $$ Medium Cost
-	EgressInternalBytes uint64                 `protobuf:"varint,5,opt,name=egress_internal_bytes,json=egressInternalBytes,proto3" json:"egress_internal_bytes,omitempty"` // $ Low/Free
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Throughput
+	BytesSent     uint64 `protobuf:"varint,1,opt,name=bytes_sent,json=bytesSent,proto3" json:"bytes_sent,omitempty"`
+	BytesReceived uint64 `protobuf:"varint,2,opt,name=bytes_received,json=bytesReceived,proto3" json:"bytes_received,omitempty"`
+	// Traffic Categorization (Egress Analyzer)
+	EgressPublicBytes   uint64 `protobuf:"varint,3,opt,name=egress_public_bytes,json=egressPublicBytes,proto3" json:"egress_public_bytes,omitempty"`
+	EgressCrossAzBytes  uint64 `protobuf:"varint,4,opt,name=egress_cross_az_bytes,json=egressCrossAzBytes,proto3" json:"egress_cross_az_bytes,omitempty"`
+	EgressInternalBytes uint64 `protobuf:"varint,5,opt,name=egress_internal_bytes,json=egressInternalBytes,proto3" json:"egress_internal_bytes,omitempty"`
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
 }
 
 func (x *NetworkMetrics) Reset() {
 	*x = NetworkMetrics{}
-	mi := &file_internal_proto_agent_v1_agent_proto_msgTypes[6]
+	mi := &file_internal_proto_agent_v1_agent_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -422,7 +413,7 @@ func (x *NetworkMetrics) String() string {
 func (*NetworkMetrics) ProtoMessage() {}
 
 func (x *NetworkMetrics) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_agent_v1_agent_proto_msgTypes[6]
+	mi := &file_internal_proto_agent_v1_agent_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -435,7 +426,7 @@ func (x *NetworkMetrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NetworkMetrics.ProtoReflect.Descriptor instead.
 func (*NetworkMetrics) Descriptor() ([]byte, []int) {
-	return file_internal_proto_agent_v1_agent_proto_rawDescGZIP(), []int{6}
+	return file_internal_proto_agent_v1_agent_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *NetworkMetrics) GetBytesSent() uint64 {
@@ -445,9 +436,9 @@ func (x *NetworkMetrics) GetBytesSent() uint64 {
 	return 0
 }
 
-func (x *NetworkMetrics) GetBytesRecv() uint64 {
+func (x *NetworkMetrics) GetBytesReceived() uint64 {
 	if x != nil {
-		return x.BytesRecv
+		return x.BytesReceived
 	}
 	return 0
 }
@@ -474,18 +465,22 @@ func (x *NetworkMetrics) GetEgressInternalBytes() uint64 {
 }
 
 type StorageMetrics struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ReadBytes     uint64                 `protobuf:"varint,1,opt,name=read_bytes,json=readBytes,proto3" json:"read_bytes,omitempty"`
-	WriteBytes    uint64                 `protobuf:"varint,2,opt,name=write_bytes,json=writeBytes,proto3" json:"write_bytes,omitempty"`
-	ReadOps       uint64                 `protobuf:"varint,3,opt,name=read_ops,json=readOps,proto3" json:"read_ops,omitempty"`
-	WriteOps      uint64                 `protobuf:"varint,4,opt,name=write_ops,json=writeOps,proto3" json:"write_ops,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Throughput
+	ReadBytes  uint64 `protobuf:"varint,1,opt,name=read_bytes,json=readBytes,proto3" json:"read_bytes,omitempty"`
+	WriteBytes uint64 `protobuf:"varint,2,opt,name=write_bytes,json=writeBytes,proto3" json:"write_bytes,omitempty"`
+	// IOPS
+	ReadOps  uint64 `protobuf:"varint,3,opt,name=read_ops,json=readOps,proto3" json:"read_ops,omitempty"`
+	WriteOps uint64 `protobuf:"varint,4,opt,name=write_ops,json=writeOps,proto3" json:"write_ops,omitempty"`
+	// Latency
+	TotalLatencyNs uint64 `protobuf:"varint,5,opt,name=total_latency_ns,json=totalLatencyNs,proto3" json:"total_latency_ns,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *StorageMetrics) Reset() {
 	*x = StorageMetrics{}
-	mi := &file_internal_proto_agent_v1_agent_proto_msgTypes[7]
+	mi := &file_internal_proto_agent_v1_agent_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -497,7 +492,7 @@ func (x *StorageMetrics) String() string {
 func (*StorageMetrics) ProtoMessage() {}
 
 func (x *StorageMetrics) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_agent_v1_agent_proto_msgTypes[7]
+	mi := &file_internal_proto_agent_v1_agent_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -510,7 +505,7 @@ func (x *StorageMetrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StorageMetrics.ProtoReflect.Descriptor instead.
 func (*StorageMetrics) Descriptor() ([]byte, []int) {
-	return file_internal_proto_agent_v1_agent_proto_rawDescGZIP(), []int{7}
+	return file_internal_proto_agent_v1_agent_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *StorageMetrics) GetReadBytes() uint64 {
@@ -541,61 +536,64 @@ func (x *StorageMetrics) GetWriteOps() uint64 {
 	return 0
 }
 
+func (x *StorageMetrics) GetTotalLatencyNs() uint64 {
+	if x != nil {
+		return x.TotalLatencyNs
+	}
+	return 0
+}
+
 var File_internal_proto_agent_v1_agent_proto protoreflect.FileDescriptor
 
 const file_internal_proto_agent_v1_agent_proto_rawDesc = "" +
 	"\n" +
-	"#internal/proto/agent/v1/agent.proto\x12\bagent.v1\"\xe6\x01\n" +
-	"\rReportRequest\x12\x1d\n" +
+	"#internal/proto/agent/v1/agent.proto\x12\bagent.v1\"\xe9\x01\n" +
+	"\rReportRequest\x12\x19\n" +
+	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x1d\n" +
 	"\n" +
-	"cluster_id\x18\x01 \x01(\tR\tclusterId\x12!\n" +
-	"\fcluster_name\x18\x02 \x01(\tR\vclusterName\x12\x1b\n" +
+	"cluster_id\x18\x02 \x01(\tR\tclusterId\x12\x1b\n" +
 	"\tnode_name\x18\x03 \x01(\tR\bnodeName\x12+\n" +
-	"\x11availability_zone\x18\x04 \x01(\tR\x10availabilityZone\x12\x19\n" +
-	"\bagent_id\x18\x05 \x01(\tR\aagentId\x12.\n" +
-	"\bsnapshot\x18\x06 \x01(\v2\x12.agent.v1.SnapshotR\bsnapshot\",\n" +
+	"\x11availability_zone\x18\x04 \x01(\tR\x10availabilityZone\x12+\n" +
+	"\x11timestamp_seconds\x18\x05 \x01(\x03R\x10timestampSeconds\x12'\n" +
+	"\x04pods\x18\x06 \x03(\v2\x13.agent.v1.PodMetricR\x04pods\"Q\n" +
 	"\x0eReportResponse\x12\x1a\n" +
-	"\baccepted\x18\x01 \x01(\bR\baccepted\"3\n" +
-	"\bSnapshot\x12'\n" +
-	"\x04pods\x18\x01 \x03(\v2\x13.agent.v1.PodMetricR\x04pods\"\xac\x03\n" +
-	"\tPodMetric\x12\x1c\n" +
-	"\tnamespace\x18\x01 \x01(\tR\tnamespace\x12\x10\n" +
-	"\x03pod\x18\x02 \x01(\tR\x03pod\x127\n" +
-	"\x06labels\x18\x03 \x03(\v2\x1f.agent.v1.PodMetric.LabelsEntryR\x06labels\x125\n" +
-	"\vcpu_metrics\x18\x04 \x01(\v2\x14.agent.v1.CpuMetricsR\n" +
-	"cpuMetrics\x12>\n" +
-	"\x0ememory_metrics\x18\x05 \x01(\v2\x17.agent.v1.MemoryMetricsR\rmemoryMetrics\x12A\n" +
-	"\x0fnetwork_metrics\x18\x06 \x01(\v2\x18.agent.v1.NetworkMetricsR\x0enetworkMetrics\x12A\n" +
-	"\x0fstorage_metrics\x18\a \x01(\v2\x18.agent.v1.StorageMetricsR\x0estorageMetrics\x1a9\n" +
-	"\vLabelsEntry\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"}\n" +
+	"\baccepted\x18\x01 \x01(\bR\baccepted\x12#\n" +
+	"\rerror_message\x18\x02 \x01(\tR\ferrorMessage\"\xdc\x02\n" +
+	"\tPodMetric\x12\x17\n" +
+	"\apod_uid\x18\x01 \x01(\tR\x06podUid\x12!\n" +
+	"\fcontainer_id\x18\x02 \x01(\tR\vcontainerId\x12\x19\n" +
+	"\bpid_tgid\x18\x03 \x01(\rR\apidTgid\x12\x1c\n" +
+	"\tnamespace\x18\x04 \x01(\tR\tnamespace\x12\x19\n" +
+	"\bpod_name\x18\x05 \x01(\tR\apodName\x12&\n" +
+	"\x03cpu\x18\x06 \x01(\v2\x14.agent.v1.CpuMetricsR\x03cpu\x12/\n" +
+	"\x06memory\x18\a \x01(\v2\x17.agent.v1.MemoryMetricsR\x06memory\x122\n" +
+	"\anetwork\x18\b \x01(\v2\x18.agent.v1.NetworkMetricsR\anetwork\x122\n" +
+	"\astorage\x18\t \x01(\v2\x18.agent.v1.StorageMetricsR\astorage\"}\n" +
 	"\n" +
 	"CpuMetrics\x12\"\n" +
 	"\rusage_user_ns\x18\x01 \x01(\x04R\vusageUserNs\x12&\n" +
 	"\x0fusage_kernel_ns\x18\x02 \x01(\x04R\rusageKernelNs\x12#\n" +
-	"\rthrottling_ns\x18\x03 \x01(\x04R\fthrottlingNs\"M\n" +
+	"\rthrottling_ns\x18\x03 \x01(\x04R\fthrottlingNs\"X\n" +
 	"\rMemoryMetrics\x12\x1b\n" +
-	"\trss_bytes\x18\x01 \x01(\x04R\brssBytes\x12\x1f\n" +
-	"\vpage_faults\x18\x02 \x01(\x04R\n" +
-	"pageFaults\"\xe5\x01\n" +
+	"\trss_bytes\x18\x01 \x01(\x04R\brssBytes\x12*\n" +
+	"\x11page_faults_major\x18\x02 \x01(\x04R\x0fpageFaultsMajor\"\xed\x01\n" +
 	"\x0eNetworkMetrics\x12\x1d\n" +
 	"\n" +
-	"bytes_sent\x18\x01 \x01(\x04R\tbytesSent\x12\x1d\n" +
-	"\n" +
-	"bytes_recv\x18\x02 \x01(\x04R\tbytesRecv\x12.\n" +
+	"bytes_sent\x18\x01 \x01(\x04R\tbytesSent\x12%\n" +
+	"\x0ebytes_received\x18\x02 \x01(\x04R\rbytesReceived\x12.\n" +
 	"\x13egress_public_bytes\x18\x03 \x01(\x04R\x11egressPublicBytes\x121\n" +
 	"\x15egress_cross_az_bytes\x18\x04 \x01(\x04R\x12egressCrossAzBytes\x122\n" +
-	"\x15egress_internal_bytes\x18\x05 \x01(\x04R\x13egressInternalBytes\"\x88\x01\n" +
+	"\x15egress_internal_bytes\x18\x05 \x01(\x04R\x13egressInternalBytes\"\xb2\x01\n" +
 	"\x0eStorageMetrics\x12\x1d\n" +
 	"\n" +
 	"read_bytes\x18\x01 \x01(\x04R\treadBytes\x12\x1f\n" +
 	"\vwrite_bytes\x18\x02 \x01(\x04R\n" +
 	"writeBytes\x12\x19\n" +
 	"\bread_ops\x18\x03 \x01(\x04R\areadOps\x12\x1b\n" +
-	"\twrite_ops\x18\x04 \x01(\x04R\bwriteOps2M\n" +
-	"\fAgentService\x12=\n" +
-	"\x06Report\x12\x17.agent.v1.ReportRequest\x1a\x18.agent.v1.ReportResponse(\x01B/Z-github.com/clustercost/backend/proto/agent/v1b\x06proto3"
+	"\twrite_ops\x18\x04 \x01(\x04R\bwriteOps\x12(\n" +
+	"\x10total_latency_ns\x18\x05 \x01(\x04R\x0etotalLatencyNs2H\n" +
+	"\tCollector\x12;\n" +
+	"\x06Report\x12\x17.agent.v1.ReportRequest\x1a\x18.agent.v1.ReportResponseB7Z5github.com/clustercost/backend/proto/agent/v1;agentv1b\x06proto3"
 
 var (
 	file_internal_proto_agent_v1_agent_proto_rawDescOnce sync.Once
@@ -609,33 +607,29 @@ func file_internal_proto_agent_v1_agent_proto_rawDescGZIP() []byte {
 	return file_internal_proto_agent_v1_agent_proto_rawDescData
 }
 
-var file_internal_proto_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_internal_proto_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_internal_proto_agent_v1_agent_proto_goTypes = []any{
 	(*ReportRequest)(nil),  // 0: agent.v1.ReportRequest
 	(*ReportResponse)(nil), // 1: agent.v1.ReportResponse
-	(*Snapshot)(nil),       // 2: agent.v1.Snapshot
-	(*PodMetric)(nil),      // 3: agent.v1.PodMetric
-	(*CpuMetrics)(nil),     // 4: agent.v1.CpuMetrics
-	(*MemoryMetrics)(nil),  // 5: agent.v1.MemoryMetrics
-	(*NetworkMetrics)(nil), // 6: agent.v1.NetworkMetrics
-	(*StorageMetrics)(nil), // 7: agent.v1.StorageMetrics
-	nil,                    // 8: agent.v1.PodMetric.LabelsEntry
+	(*PodMetric)(nil),      // 2: agent.v1.PodMetric
+	(*CpuMetrics)(nil),     // 3: agent.v1.CpuMetrics
+	(*MemoryMetrics)(nil),  // 4: agent.v1.MemoryMetrics
+	(*NetworkMetrics)(nil), // 5: agent.v1.NetworkMetrics
+	(*StorageMetrics)(nil), // 6: agent.v1.StorageMetrics
 }
 var file_internal_proto_agent_v1_agent_proto_depIdxs = []int32{
-	2, // 0: agent.v1.ReportRequest.snapshot:type_name -> agent.v1.Snapshot
-	3, // 1: agent.v1.Snapshot.pods:type_name -> agent.v1.PodMetric
-	8, // 2: agent.v1.PodMetric.labels:type_name -> agent.v1.PodMetric.LabelsEntry
-	4, // 3: agent.v1.PodMetric.cpu_metrics:type_name -> agent.v1.CpuMetrics
-	5, // 4: agent.v1.PodMetric.memory_metrics:type_name -> agent.v1.MemoryMetrics
-	6, // 5: agent.v1.PodMetric.network_metrics:type_name -> agent.v1.NetworkMetrics
-	7, // 6: agent.v1.PodMetric.storage_metrics:type_name -> agent.v1.StorageMetrics
-	0, // 7: agent.v1.AgentService.Report:input_type -> agent.v1.ReportRequest
-	1, // 8: agent.v1.AgentService.Report:output_type -> agent.v1.ReportResponse
-	8, // [8:9] is the sub-list for method output_type
-	7, // [7:8] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	2, // 0: agent.v1.ReportRequest.pods:type_name -> agent.v1.PodMetric
+	3, // 1: agent.v1.PodMetric.cpu:type_name -> agent.v1.CpuMetrics
+	4, // 2: agent.v1.PodMetric.memory:type_name -> agent.v1.MemoryMetrics
+	5, // 3: agent.v1.PodMetric.network:type_name -> agent.v1.NetworkMetrics
+	6, // 4: agent.v1.PodMetric.storage:type_name -> agent.v1.StorageMetrics
+	0, // 5: agent.v1.Collector.Report:input_type -> agent.v1.ReportRequest
+	1, // 6: agent.v1.Collector.Report:output_type -> agent.v1.ReportResponse
+	6, // [6:7] is the sub-list for method output_type
+	5, // [5:6] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_internal_proto_agent_v1_agent_proto_init() }
@@ -649,7 +643,7 @@ func file_internal_proto_agent_v1_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_proto_agent_v1_agent_proto_rawDesc), len(file_internal_proto_agent_v1_agent_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

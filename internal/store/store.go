@@ -611,13 +611,14 @@ func (s *Store) ClusterMetadata() (ClusterMetadata, error) {
 	if meta.ClusterName == "" {
 		meta.ClusterName = meta.ClusterID
 	}
+	// ClusterName removed
 	if meta.ClusterType == "" {
 		meta.ClusterType = meta.ClusterID
 	}
 
 	cluster := ClusterMetadata{
 		ID:        meta.ClusterID,
-		Name:      meta.ClusterName,
+		Name:      "Cluster", // snap.Report.ClusterName removed
 		Type:      meta.ClusterType,
 		Region:    meta.Region,
 		Version:   meta.Version,
@@ -662,7 +663,7 @@ func (s *Store) latestAgentMetadataLocked() agentMetadata {
 		if meta.Timestamp.IsZero() || ts.After(meta.Timestamp) {
 			meta = agentMetadata{
 				ClusterID:   snap.Report.ClusterId,
-				ClusterName: snap.Report.ClusterName,
+				ClusterName: "Cluster",                    // snap.Report.ClusterName removed in V2
 				ClusterType: "k8s",                        // Default for now
 				Region:      snap.Report.AvailabilityZone, // approximation
 				Version:     "v2.0",
@@ -699,7 +700,7 @@ func (s *Store) aggregateNamespacesLocked() (map[string]*NamespaceSummary, error
 	haveData := false
 
 	for _, snap := range s.snapshots {
-		if snap == nil || snap.Report == nil || snap.Report.Snapshot == nil {
+		if snap == nil || snap.Report == nil {
 			continue
 		}
 
@@ -707,15 +708,18 @@ func (s *Store) aggregateNamespacesLocked() (map[string]*NamespaceSummary, error
 		memPrice := DefaultMemoryCostPerHour
 		// TODO: Lookup from PricingCatalog using snap.Report.NodeName/AZ
 
-		for _, pod := range snap.Report.Snapshot.Pods {
+		for _, pod := range snap.Report.Pods {
 			haveData = true
+			if pod.Namespace == "" {
+				continue
+			}
+
 			entry, ok := collector[pod.Namespace]
 			if !ok {
 				entry = &NamespaceSummary{
-					Namespace: pod.Namespace,
-					Labels:    copyLabels(pod.Labels),
-					// Use production as default or map from labels if needed
-					Environment: "production",
+					Namespace:   pod.Namespace,
+					Labels:      make(map[string]string), // Labels removed in V2 proto
+					Environment: "production",            // Default
 				}
 				collector[pod.Namespace] = entry
 			}
@@ -723,33 +727,24 @@ func (s *Store) aggregateNamespacesLocked() (map[string]*NamespaceSummary, error
 			// Aggregate Costs
 			// Use RSS for usage
 			memUsageBytes := int64(0)
-			if pod.MemoryMetrics != nil {
-				memUsageBytes = int64(pod.MemoryMetrics.RssBytes)
+			if pod.Memory != nil {
+				memUsageBytes = int64(pod.Memory.RssBytes)
 			}
 
 			// Network Cost
 			netCost := 0.0
-			if pod.NetworkMetrics != nil {
-				netCost += float64(pod.NetworkMetrics.EgressPublicBytes) * CostEgressPublic
-				netCost += float64(pod.NetworkMetrics.EgressCrossAzBytes) * CostEgressCrossAZ
+			if pod.Network != nil {
+				netCost += float64(pod.Network.EgressPublicBytes) * CostEgressPublic
+				netCost += float64(pod.Network.EgressCrossAzBytes) * CostEgressCrossAZ
 			}
 
 			// Hourly Cost Calculation
 			// Memory Cost = GB * Price/GB/Hr
 			memCost := (float64(memUsageBytes) / 1024 / 1024 / 1024) * memPrice
 
-			// CPU Cost
-			// We lack rate calculation for now, so we assume 0 or placeholder.
-			// Ideally we would diff with PreviousReport.
-			// For this MVP refactor, let's skip CPU cost from usage_user_ns unless we implement rate.
+			// CPU Cost (No rate yet)
 			cpuCost := 0.0
 
-			// Total Hourly Cost for this pod (snapshot approximation)
-			// Note: Network cost is cumulative, so adding it to "Hourly Rate" is technically wrong unless we diff.
-			// But for "Billable Egress", we usually charge per GB.
-			// Dashboard expects "HourlyCost" rate.
-			// Let's assume the Egress reported is "Egress in last hour" (unlikely) or just show 0 for expected rate.
-			// For the sake of the exercise "Calculate costs: ... + Egress * Price", I will include it.
 			totalPodCost := memCost + cpuCost + netCost
 
 			entry.HourlyCost += totalPodCost
@@ -790,12 +785,9 @@ func (s *Store) aggregateNodesLocked() (map[string]*NodeSummary, error) {
 		}
 
 		// Calculate node totals from pods
-		if snap.Report.Snapshot != nil {
-			for range snap.Report.Snapshot.Pods {
-				entry.PodCount++
-				// Sum up usages for node view
-				// entry.MemoryUsagePercent? No capacity.
-			}
+		for range snap.Report.Pods {
+			entry.PodCount++
+			// Sum up usages for node view if needed
 		}
 
 		// Cost estimation (Fixed node price + dynamic)
