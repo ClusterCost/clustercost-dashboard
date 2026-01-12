@@ -276,10 +276,18 @@ func (i *Ingestor) appendReport(buf *bytes.Buffer, env reportEnvelope) {
 
 		nodeName := req.NodeName
 
+		region := req.Region
+		if region == "" {
+			region = req.AvailabilityZone
+		}
+
 		podLabels := appendLabels(base,
 			label{"namespace", pod.Namespace},
 			label{"pod", pod.PodName},
 			label{"node", nodeName},
+			label{"availability_zone", req.AvailabilityZone},
+			label{"region", region},
+			label{"instance_type", req.InstanceType},
 			label{"environment", environment},
 		)
 
