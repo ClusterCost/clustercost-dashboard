@@ -290,16 +290,22 @@ func (c *Client) NetworkTopology(ctx context.Context, opts store.NetworkTopology
 	windowStr := formatDuration(window)
 
 	labels := map[string]string{"cluster_id": clusterID}
+	queryNamespace := ""
+	if len(opts.Namespaces) == 1 {
+		queryNamespace = opts.Namespaces[0]
+	}
 	groupLabels := []string{
 		"src_namespace",
 		"src_pod",
 		"src_node",
 		"src_ip",
+		"src_dns_name",
 		"src_availability_zone",
 		"dst_namespace",
 		"dst_pod",
 		"dst_node",
 		"dst_ip",
+		"dst_dns_name",
 		"dst_availability_zone",
 		"dst_kind",
 		"service_match",
@@ -310,10 +316,9 @@ func (c *Client) NetworkTopology(ctx context.Context, opts store.NetworkTopology
 
 	endSeconds := opts.End.UTC().Unix()
 
-	bytesSentExpr := connectionMetricExpr("clustercost_connection_bytes_sent_total", labels, opts.Namespace, windowStr, endSeconds, groupBy, "increase")
-	bytesRecvExpr := connectionMetricExpr("clustercost_connection_bytes_received_total", labels, opts.Namespace, windowStr, endSeconds, groupBy, "increase")
-	egressExpr := connectionMetricExpr("clustercost_connection_egress_cost_usd_total", labels, opts.Namespace, windowStr, endSeconds, groupBy, "increase")
-	countExpr := connectionMetricExpr("clustercost_connection_bytes_sent_total", labels, opts.Namespace, windowStr, endSeconds, groupBy, "count")
+	bytesSentExpr := connectionMetricExpr("clustercost_connection_bytes_sent_total", labels, queryNamespace, windowStr, endSeconds, groupBy, "increase")
+	bytesRecvExpr := connectionMetricExpr("clustercost_connection_bytes_received_total", labels, queryNamespace, windowStr, endSeconds, groupBy, "increase")
+	countExpr := connectionMetricExpr("clustercost_connection_bytes_sent_total", labels, queryNamespace, windowStr, endSeconds, groupBy, "count")
 
 	sentSamples, err := c.query(ctx, bytesSentExpr)
 	if err != nil {
@@ -323,21 +328,29 @@ func (c *Client) NetworkTopology(ctx context.Context, opts store.NetworkTopology
 	if err != nil {
 		return nil, err
 	}
-	egressSamples, err := c.query(ctx, egressExpr)
-	if err != nil {
-		return nil, err
-	}
 
 	startSeconds := opts.Start.UTC().Unix()
 	edges := make(map[string]*store.NetworkEdge)
+
+	namespaceSet := make(map[string]struct{}, len(opts.Namespaces))
+	for _, namespace := range opts.Namespaces {
+		if namespace == "" {
+			continue
+		}
+		namespaceSet[namespace] = struct{}{}
+	}
 
 	applySample := func(sample sample, assign func(*store.NetworkEdge, float64)) {
 		edge := edgeFromLabels(sample.labels, groupLabels)
 		if edge == nil {
 			return
 		}
-		if opts.Namespace != "" && edge.SrcNamespace != opts.Namespace && edge.DstNamespace != opts.Namespace {
-			return
+		if len(namespaceSet) > 0 {
+			if _, ok := namespaceSet[edge.SrcNamespace]; !ok {
+				if _, ok := namespaceSet[edge.DstNamespace]; !ok {
+					return
+				}
+			}
 		}
 		key := edgeKey(sample.labels, groupLabels)
 		current := edges[key]
@@ -360,11 +373,6 @@ func (c *Client) NetworkTopology(ctx context.Context, opts store.NetworkTopology
 			edge.BytesReceived = int64(value)
 		})
 	}
-	for _, sample := range egressSamples {
-		applySample(sample, func(edge *store.NetworkEdge, value float64) {
-			edge.EgressCostUSD = value
-		})
-	}
 	countSamples, err := c.query(ctx, countExpr)
 	if err != nil {
 		return nil, err
@@ -381,6 +389,15 @@ func (c *Client) NetworkTopology(ctx context.Context, opts store.NetworkTopology
 
 	list := make([]store.NetworkEdge, 0, len(edges))
 	for _, edge := range edges {
+		if opts.MinCostUSD > 0 && edge.EgressCostUSD <= opts.MinCostUSD {
+			continue
+		}
+		if opts.MinBytes > 0 && (edge.BytesSent+edge.BytesReceived) < opts.MinBytes {
+			continue
+		}
+		if opts.MinConnections > 0 && edge.ConnectionCount < opts.MinConnections {
+			continue
+		}
 		list = append(list, *edge)
 	}
 	sort.Slice(list, func(i, j int) bool {
@@ -574,16 +591,37 @@ func (c *Client) namespaceMetrics(ctx context.Context, environment, namespace st
 
 	// We use pod metrics and aggregate them on the fly
 	metrics := []struct {
-		name   string
-		agg    string // "sum" or "count"
-		assign func(entry *store.NamespaceSummary, value float64)
+		name     string
+		agg      string // "sum" or "count"
+		assign   func(entry *store.NamespaceSummary, value float64)
+		expr     func(clusterID string, labels map[string]string) string
+		fallback string
 	}{
-		{"clustercost_pod_hourly_cost", "sum", func(e *store.NamespaceSummary, v float64) { e.HourlyCost = v }},
-		{"clustercost_pod_hourly_cost", "count", func(e *store.NamespaceSummary, v float64) { e.PodCount = int(v) }},
-		{"clustercost_pod_cpu_request_milli", "sum", func(e *store.NamespaceSummary, v float64) { e.CPURequestMilli = int64(v) }},
-		{"clustercost_pod_cpu_usage_milli", "sum", func(e *store.NamespaceSummary, v float64) { e.CPUUsageMilli = int64(v) }},
-		{"clustercost_pod_memory_request_bytes", "sum", func(e *store.NamespaceSummary, v float64) { e.MemoryRequestBytes = int64(v) }},
-		{"clustercost_pod_memory_usage_bytes", "sum", func(e *store.NamespaceSummary, v float64) { e.MemoryUsageBytes = int64(v) }},
+		{"clustercost_namespace_pod_count", "sum", func(e *store.NamespaceSummary, v float64) { e.PodCount = int(v) }, nil, ""},
+		{
+			"clustercost_namespace_cpu_request_millicores",
+			"sum",
+			func(e *store.NamespaceSummary, v float64) { e.CPURequestMilli = int64(v) },
+			nil,
+			"clustercost_pod_cpu_request_millicores",
+		},
+		{
+			"clustercost_namespace_cpu_usage_milli",
+			"sum",
+			func(e *store.NamespaceSummary, v float64) { e.CPUUsageMilli = int64(v) },
+			func(clusterID string, labels map[string]string) string {
+				return fmt.Sprintf("sum by (namespace, environment) (%s)", c.lookbackExpr("clustercost_namespace_cpu_usage_milli", labels, clusterID))
+			},
+			"clustercost_pod_cpu_usage_milli",
+		},
+		{
+			"clustercost_namespace_memory_request_bytes",
+			"sum",
+			func(e *store.NamespaceSummary, v float64) { e.MemoryRequestBytes = int64(v) },
+			nil,
+			"clustercost_pod_memory_request_bytes",
+		},
+		{"clustercost_namespace_memory_rss_bytes_total", "sum", func(e *store.NamespaceSummary, v float64) { e.MemoryUsageBytes = int64(v) }, nil, ""},
 	}
 
 	out := make(map[string]*store.NamespaceSummary)
@@ -596,10 +634,24 @@ func (c *Client) namespaceMetrics(ctx context.Context, environment, namespace st
 		// e.g. sum by (namespace, environment) (last_over_time(clustercost_pod_hourly_cost{...}[1h]))
 		// Note: lookbackExpr returns "last_over_time(metric{...}[lookback])"
 		// We wrap that in the aggregation.
-		expr := fmt.Sprintf("%s by (namespace, environment) (%s)", metric.agg, c.lookbackExpr(metric.name, labels, clusterID))
+		queryExpr := func(metricName string) (string, error) {
+			if metric.expr != nil && metricName == metric.name {
+				return metric.expr(clusterID, labels), nil
+			}
+			return fmt.Sprintf("%s by (namespace, environment) (%s)", metric.agg, c.lookbackExpr(metricName, labels, clusterID)), nil
+		}
+
+		expr, _ := queryExpr(metric.name)
 		samples, err := c.query(ctx, expr)
 		if err != nil {
 			return nil, time.Time{}, err
+		}
+		if len(samples) == 0 && metric.fallback != "" {
+			fallbackExpr, _ := queryExpr(metric.fallback)
+			samples, err = c.query(ctx, fallbackExpr)
+			if err != nil {
+				return nil, time.Time{}, err
+			}
 		}
 		for _, sample := range samples {
 			ns := sample.labels["namespace"]
@@ -626,7 +678,110 @@ func (c *Client) namespaceMetrics(ctx context.Context, environment, namespace st
 		}
 	}
 
-	latest = c.seriesTimestampSafe(ctx, "clustercost_pod_hourly_cost")
+	queryScalar := func(expr string) (float64, error) {
+		samples, err := c.query(ctx, expr)
+		if err != nil {
+			return 0, err
+		}
+		if len(samples) == 0 {
+			return 0, ErrNoData
+		}
+		return samples[0].value, nil
+	}
+
+	nodeCostExpr := fmt.Sprintf("sum(max by (node) (%s))", c.lookbackExpr("clustercost_node_hourly_cost", nil, clusterID))
+	cpuAllocExpr := fmt.Sprintf("sum(max by (node) (%s))", c.lookbackExpr("clustercost_node_cpu_allocatable_milli", nil, clusterID))
+	memAllocExpr := fmt.Sprintf("sum(max by (node) (%s))", c.lookbackExpr("clustercost_node_memory_allocatable_bytes", nil, clusterID))
+
+	nodeCost, err := queryScalar(nodeCostExpr)
+	if err == nil && nodeCost > 0 {
+		cpuAllocMilli, errCPU := queryScalar(cpuAllocExpr)
+		memAllocBytes, errMem := queryScalar(memAllocExpr)
+		if errCPU == nil && errMem == nil && cpuAllocMilli > 0 && memAllocBytes > 0 {
+			cpuPrice := (nodeCost * 0.5) / (cpuAllocMilli / 1000.0)
+			memPrice := (nodeCost * 0.5) / (memAllocBytes / (1024.0 * 1024.0 * 1024.0))
+			for _, entry := range out {
+				cpuUsageCores := float64(entry.CPUUsageMilli) / 1000.0
+				memUsageGB := float64(entry.MemoryUsageBytes) / (1024.0 * 1024.0 * 1024.0)
+				entry.HourlyCost = (cpuUsageCores * cpuPrice) + (memUsageGB * memPrice)
+			}
+		}
+	}
+
+	latest = c.seriesTimestampSafe(ctx, "clustercost_namespace_memory_rss_bytes_total")
+
+	type nodeAlloc struct {
+		instanceType string
+		region       string
+		cpuMilli     float64
+		memBytes     float64
+	}
+	nodes := make(map[string]*nodeAlloc)
+	loadNodeAlloc := func(metric string, assign func(entry *nodeAlloc, value float64)) error {
+		expr := fmt.Sprintf("max by (node,instance_type,cluster_region) (%s)", c.lookbackExpr(metric, nil, clusterID))
+		samples, err := c.query(ctx, expr)
+		if err != nil {
+			return err
+		}
+		for _, sample := range samples {
+			node := sample.labels["node"]
+			if node == "" {
+				continue
+			}
+			entry := nodes[node]
+			if entry == nil {
+				entry = &nodeAlloc{
+					instanceType: sample.labels["instance_type"],
+					region:       sample.labels["cluster_region"],
+				}
+				nodes[node] = entry
+			}
+			if entry.instanceType == "" {
+				entry.instanceType = sample.labels["instance_type"]
+			}
+			if entry.region == "" {
+				entry.region = sample.labels["cluster_region"]
+			}
+			assign(entry, sample.value)
+		}
+		return nil
+	}
+
+	if err := loadNodeAlloc("clustercost_node_cpu_allocatable_milli", func(entry *nodeAlloc, value float64) {
+		entry.cpuMilli = value
+	}); err == nil {
+		_ = loadNodeAlloc("clustercost_node_memory_allocatable_bytes", func(entry *nodeAlloc, value float64) {
+			entry.memBytes = value
+		})
+	}
+
+	pricing := store.NewPricingCatalog(nil)
+	totalNodeCost := 0.0
+	totalCpuCores := 0.0
+	totalMemGB := 0.0
+	for _, entry := range nodes {
+		if entry.cpuMilli > 0 {
+			totalCpuCores += entry.cpuMilli / 1000.0
+		}
+		if entry.memBytes > 0 {
+			totalMemGB += entry.memBytes / (1024.0 * 1024.0 * 1024.0)
+		}
+		instanceType := entry.instanceType
+		if instanceType == "" {
+			instanceType = "default"
+		}
+		totalNodeCost += pricing.GetTotalNodePrice(context.Background(), entry.region, instanceType)
+	}
+
+	if totalNodeCost > 0 && totalCpuCores > 0 && totalMemGB > 0 {
+		cpuPrice := (totalNodeCost * 0.5) / totalCpuCores
+		memPrice := (totalNodeCost * 0.5) / totalMemGB
+		for _, entry := range out {
+			cpuUsageCores := float64(entry.CPUUsageMilli) / 1000.0
+			memUsageGB := float64(entry.MemoryUsageBytes) / (1024.0 * 1024.0 * 1024.0)
+			entry.HourlyCost = (cpuUsageCores * cpuPrice) + (memUsageGB * memPrice)
+		}
+	}
 	return out, latest, nil
 }
 
@@ -759,11 +914,13 @@ func edgeFromLabels(labels map[string]string, keys []string) *store.NetworkEdge 
 		SrcPodName:   labels["src_pod"],
 		SrcNodeName:  labels["src_node"],
 		SrcIP:        labels["src_ip"],
+		SrcDNSName:   labels["src_dns_name"],
 		SrcAZ:        labels["src_availability_zone"],
 		DstNamespace: labels["dst_namespace"],
 		DstPodName:   labels["dst_pod"],
 		DstNodeName:  labels["dst_node"],
 		DstIP:        labels["dst_ip"],
+		DstDNSName:   labels["dst_dns_name"],
 		DstAZ:        labels["dst_availability_zone"],
 		DstKind:      labels["dst_kind"],
 		ServiceMatch: labels["service_match"],

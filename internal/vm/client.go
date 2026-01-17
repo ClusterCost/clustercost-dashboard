@@ -346,10 +346,9 @@ func (c *Client) GetPodP95Usage(ctx context.Context, clusterID, namespace, podNa
 		labels["cluster_id"] = clusterID
 	}
 
-	// CPU Query: quantile_over_time(0.95, rate(clustercost_pod_cpu_usage_seconds_total{...}[10s])[1h])
-	// We use the configured lookback for the outer range.
-	// Rate interval is hardcoded to 1m for smoothness, or matched to scrape interval.
-	cpuQuery := fmt.Sprintf("quantile_over_time(0.95, rate(clustercost_pod_cpu_usage_seconds_total%s[1m])[%s])",
+	// CPU Query: quantile_over_time(0.95, clustercost_pod_cpu_usage_milli{...}[1h]) / 1000
+	// Pod CPU usage is reported as millicores (gauge).
+	cpuQuery := fmt.Sprintf("quantile_over_time(0.95, clustercost_pod_cpu_usage_milli%s[%s]) / 1000",
 		formatLabels(labels), c.lookback.String())
 
 	// Memory Query: quantile_over_time(0.95, clustercost_pod_memory_rss_bytes{...}[1h])

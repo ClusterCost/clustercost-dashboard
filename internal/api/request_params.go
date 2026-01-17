@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -28,6 +29,53 @@ func parseOffset(raw string) int {
 		return 0
 	}
 	return parsed
+}
+
+func parseFloat(raw string, fallback float64) float64 {
+	if raw == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseFloat(raw, 64)
+	if err != nil || parsed < 0 {
+		return fallback
+	}
+	return parsed
+}
+
+func parseInt64(raw string, fallback int64) int64 {
+	if raw == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || parsed < 0 {
+		return fallback
+	}
+	return parsed
+}
+
+func parseNamespaceList(raw []string) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(raw))
+	list := make([]string, 0, len(raw))
+	for _, entry := range raw {
+		if entry == "" {
+			continue
+		}
+		for _, value := range strings.Split(entry, ",") {
+			trimmed := strings.TrimSpace(value)
+			if trimmed == "" {
+				continue
+			}
+			if _, ok := seen[trimmed]; ok {
+				continue
+			}
+			seen[trimmed] = struct{}{}
+			list = append(list, trimmed)
+		}
+	}
+	return list
 }
 
 func clusterIDFromRequest(r *http.Request) string {

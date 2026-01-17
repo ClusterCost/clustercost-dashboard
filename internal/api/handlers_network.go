@@ -22,8 +22,11 @@ type NetworkTopologyResponse struct {
 
 func (h *Handler) NetworkTopology(w http.ResponseWriter, r *http.Request) {
 	clusterID := clusterIDFromRequest(r)
-	namespace := r.URL.Query().Get("namespace")
+	namespaces := parseNamespaceList(r.URL.Query()["namespace"])
 	limit := parseLimit(r.URL.Query().Get("limit"), 2000, 10000)
+	minCostUSD := parseFloat(r.URL.Query().Get("minCost"), 0)
+	minBytes := parseInt64(r.URL.Query().Get("minBytes"), 0)
+	minConnections := parseInt64(r.URL.Query().Get("minConnections"), 0)
 
 	start, end, err := parseTimeRange(r, 1*time.Hour)
 	if err != nil {
@@ -36,14 +39,21 @@ func (h *Handler) NetworkTopology(w http.ResponseWriter, r *http.Request) {
 	}
 
 	edges, err := h.vm.NetworkTopology(r.Context(), store.NetworkTopologyOptions{
-		ClusterID: clusterID,
-		Namespace: namespace,
-		Start:     start,
-		End:       end,
-		Limit:     limit,
+		ClusterID:      clusterID,
+		Namespaces:     namespaces,
+		Start:          start,
+		End:            end,
+		Limit:          limit,
+		MinCostUSD:     minCostUSD,
+		MinBytes:       minBytes,
+		MinConnections: minConnections,
 	})
 	if err != nil {
 		if errors.Is(err, vm.ErrNoData) {
+			namespace := ""
+			if len(namespaces) == 1 {
+				namespace = namespaces[0]
+			}
 			writeJSON(w, http.StatusOK, NetworkTopologyResponse{
 				ClusterID:      clusterID,
 				Namespace:      namespace,
@@ -60,6 +70,10 @@ func (h *Handler) NetworkTopology(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	namespace := ""
+	if len(namespaces) == 1 {
+		namespace = namespaces[0]
+	}
 	writeJSON(w, http.StatusOK, NetworkTopologyResponse{
 		ClusterID:      clusterID,
 		Namespace:      namespace,

@@ -11,13 +11,14 @@ import ReactFlow, {
 } from "reactflow";
 import "reactflow/dist/style.css";
 
-import { fetchNetworkTopology, type NetworkEdge } from "@/lib/api";
+import { fetchNamespaces, fetchNetworkTopology, type NetworkEdge } from "@/lib/api";
 import { useApiData } from "@/hooks/useApiData";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
 import {
   Box,
   Cloud,
@@ -41,8 +42,12 @@ const nodeSpacing = 220;
 const groupPadding = 22;
 const groupHeaderHeight = 36;
 const defaultCostThreshold = 0.01;
+const defaultMinBytesMb = 0;
+const defaultMinConnections = 0;
 const maxExternalEndpoints = 10;
 const maxInfraEndpoints = 10;
+const tierGap = 90;
+const externalRowPadding = 40;
 
 type ResourceKind =
   | "service"
@@ -116,7 +121,7 @@ const extractServiceName = (services: string | null | undefined) => {
 
 const getExternalKey = (edge: NetworkEdge) => {
   if (edge.dstKind !== "external") return "";
-  return `external:${edge.dstIp || "unknown"}`;
+  return `external:${edge.dstDnsName || edge.dstIp || "unknown"}`;
 };
 
 const getInfraKey = (edge: NetworkEdge, side: "src" | "dst") => {
@@ -141,6 +146,7 @@ const buildEndpointGroup = (
   const pod = side === "src" ? edge.srcPodName : edge.dstPodName;
   const node = side === "src" ? edge.srcNodeName : edge.dstNodeName;
   const ip = side === "src" ? edge.srcIp : edge.dstIp;
+  const dnsName = side === "src" ? edge.srcDnsName : edge.dstDnsName;
   const isExternal = side === "dst" && edge.dstKind === "external";
   const services = side === "dst" ? edge.dstServices : "";
 
@@ -156,8 +162,8 @@ const buildEndpointGroup = (
       };
     }
     return {
-      id: externalKey || `external:${ip || "unknown"}`,
-      title: ip || "External",
+      id: externalKey || `external:${dnsName || ip || "unknown"}`,
+      title: dnsName || ip || "External",
       kind: "external" as const,
       namespace: "external",
       isExternal: true
@@ -220,8 +226,8 @@ const buildEndpointGroup = (
       };
     }
     return {
-      id: `${side}:ip:${ip}`,
-      title: ip,
+      id: `${side}:ip:${dnsName || ip}`,
+      title: dnsName || ip,
       kind: "ip" as const,
       namespace: "infrastructure",
       isExternal: false
@@ -238,27 +244,39 @@ const buildEndpointGroup = (
 };
 
 const edgeColor = (edge: AggregatedEdge) => {
+  if (edge.direction === "egress" && edge.egressCostUsd > 0.01) return "#f97316";
   if (edge.isExternal && edge.direction === "ingress") return "#2563eb";
   if (edge.isExternal) return "#ef4444";
+  if (edge.egressCostUsd < 0.01) return "rgba(148,163,184,0.45)";
   if (edge.isCrossAz) return "#f97316";
   return "#0ea5a4";
 };
 
 const edgeLabel = (edge: AggregatedEdge) => {
-  const cost = edge.egressCostUsd ? `$${edge.egressCostUsd.toFixed(2)}` : "$0.00";
-  const bytes = edge.bytesSent + edge.bytesReceived;
-  if (bytes <= 0) return cost;
-  const mb = bytes / (1024 * 1024);
-  const direction = edge.direction === "internal" ? "Internal" : edge.direction === "egress" ? "Egress" : "Ingress";
-  return `${direction} • ${cost} • ${mb.toFixed(1)}MB • ${edge.connectionCount} conns`;
+  if (!edge.egressCostUsd) return "$0.00";
+  return `$${edge.egressCostUsd.toFixed(2)}`;
 };
 
 const edgeWidth = (edge: AggregatedEdge) => {
-  const bytes = edge.bytesSent + edge.bytesReceived;
-  if (bytes <= 0) return 1.5;
-  const mb = bytes / (1024 * 1024);
-  const connWeight = Math.log10(edge.connectionCount + 1) * 0.6;
-  return Math.min(7, Math.max(1.5, 1.2 + Math.log10(mb + 1) + connWeight));
+  if (edge.egressCostUsd <= 0.01 && edge.direction === "internal") return 1;
+  const costWeight = Math.log10(edge.egressCostUsd + 1) * 2;
+  return Math.min(8, Math.max(1.5, 2 + costWeight));
+};
+
+const isSystemNamespace = (value: string) => {
+  if (!value) return false;
+  const normalized = value.toLowerCase();
+  return (
+    normalized === "kube-system" ||
+    normalized === "kube-public" ||
+    normalized === "kube-node-lease" ||
+    normalized === "elastic-system" ||
+    normalized === "istio-system" ||
+    normalized === "monitoring" ||
+    normalized === "ingress-nginx" ||
+    normalized === "cert-manager" ||
+    normalized === "infrastructure"
+  );
 };
 
 const kindMeta: Record<
@@ -279,6 +297,8 @@ const kindMeta: Record<
 const ResourceNode = ({ data }: NodeProps<ResourceNodeData>) => {
   const meta = kindMeta[data.kind];
   const Icon = meta.icon;
+  const sourcePosition = data.kind === "external" ? Position.Bottom : Position.Top;
+  const targetPosition = Position.Bottom;
 
   return (
     <div
@@ -293,7 +313,7 @@ const ResourceNode = ({ data }: NodeProps<ResourceNodeData>) => {
         wordBreak: "break-word"
       }}
     >
-      <Handle type="target" position={Position.Left} style={{ background: meta.color }} />
+      <Handle type="target" position={targetPosition} style={{ background: meta.color }} />
       <div className="flex items-center gap-2">
         <span
           className="flex h-7 w-7 items-center justify-center rounded-full"
@@ -307,7 +327,7 @@ const ResourceNode = ({ data }: NodeProps<ResourceNodeData>) => {
       </div>
       <div className="mt-2 text-sm font-semibold leading-tight">{data.title}</div>
       <div className="text-xs text-muted-foreground">{data.namespace}</div>
-      <Handle type="source" position={Position.Right} style={{ background: meta.color }} />
+      <Handle type="source" position={sourcePosition} style={{ background: meta.color }} />
     </div>
   );
 };
@@ -324,33 +344,61 @@ const NamespaceNode = ({ data }: NodeProps<NamespaceNodeData>) => (
       padding: groupPadding
     }}
   >
+    <Handle type="target" position={Position.Bottom} style={{ opacity: 0 }} />
     <div className="flex items-center justify-between">
       <div className="text-sm font-semibold text-slate-800">{data.name}</div>
       <div className="rounded-full bg-slate-900/10 px-2 py-0.5 text-xs font-semibold text-slate-700">
         {data.count}
       </div>
     </div>
+    <Handle type="source" position={Position.Top} style={{ opacity: 0 }} />
   </div>
 );
 
 const NetworkTopologyPage = () => {
   const [lookback, setLookback] = useState("1h");
-  const [namespace, setNamespace] = useState("");
+  const [namespaces, setNamespaces] = useState<string[]>([]);
+  const [namespaceCandidate, setNamespaceCandidate] = useState("");
   const [limit, setLimit] = useState(500);
   const [costThreshold, setCostThreshold] = useState(defaultCostThreshold);
+  const [minBytesMb, setMinBytesMb] = useState(defaultMinBytesMb);
+  const [minConnections, setMinConnections] = useState(defaultMinConnections);
   const nodeTypes = useMemo(() => ({ resource: ResourceNode, namespace: NamespaceNode }), []);
 
   const fetchTopology = useCallback(
     () =>
       fetchNetworkTopology({
         lookback,
-        namespace: namespace || undefined,
-        limit: limit > 0 ? limit : undefined
+        namespace: namespaces.length > 0 ? namespaces : undefined,
+        limit: limit > 0 ? limit : undefined,
+        minCost: costThreshold > 0 ? costThreshold : undefined,
+        minBytes: minBytesMb > 0 ? Math.round(minBytesMb * 1024 * 1024) : undefined,
+        minConnections: minConnections > 0 ? minConnections : undefined
       }),
-    [lookback, namespace, limit]
+    [lookback, namespaces, limit, costThreshold, minBytesMb, minConnections]
   );
 
   const { data, loading, error, refresh } = useApiData(fetchTopology);
+  const { data: namespaceData } = useApiData(fetchNamespaces);
+
+  const namespaceOptions = useMemo(() => {
+    if (!namespaceData?.records) return [];
+    return namespaceData.records
+      .map((record) => record.namespace)
+      .filter((name) => name)
+      .sort((a, b) => a.localeCompare(b));
+  }, [namespaceData]);
+
+  const addNamespace = useCallback(() => {
+    if (!namespaceCandidate) return;
+    if (namespaces.includes(namespaceCandidate)) return;
+    setNamespaces((prev) => [...prev, namespaceCandidate]);
+    setNamespaceCandidate("");
+  }, [namespaceCandidate, namespaces]);
+
+  const removeNamespace = useCallback((value: string) => {
+    setNamespaces((prev) => prev.filter((entry) => entry !== value));
+  }, []);
 
   const { nodes, edges } = useMemo(() => {
     if (!data?.edges?.length) return { nodes: [], edges: [] };
@@ -362,7 +410,6 @@ const NetworkTopologyPage = () => {
     const infraUsage = new Map<string, number>();
 
     data.edges.forEach((edge) => {
-      if (edge.egressCostUsd <= costThreshold) return;
       const bytes = edge.bytesSent + edge.bytesReceived;
       const externalKey = getExternalKey(edge);
       if (externalKey) {
@@ -390,7 +437,6 @@ const NetworkTopologyPage = () => {
     );
 
     data.edges.forEach((edge) => {
-      if (edge.egressCostUsd <= costThreshold) return;
       const srcGroup = buildEndpointGroup(edge, "src", topExternal, topInfra);
       const dstGroup = buildEndpointGroup(edge, "dst", topExternal, topInfra);
 
@@ -411,7 +457,18 @@ const NetworkTopologyPage = () => {
         });
       }
 
-      const key = `${srcGroup.id}->${dstGroup.id}`;
+      const srcEdgeId =
+        dstGroup.kind === "external" && srcGroup.namespace
+          ? `namespace:${srcGroup.namespace}`
+          : srcGroup.kind === "external" && dstGroup.namespace
+          ? srcGroup.id
+          : srcGroup.id;
+      const dstEdgeId =
+        srcGroup.kind === "external" && dstGroup.namespace
+          ? `namespace:${dstGroup.namespace}`
+          : dstGroup.id;
+
+      const key = `${srcEdgeId}->${dstEdgeId}`;
       const isCrossAz =
         Boolean(edge.srcAvailabilityZone) &&
         Boolean(edge.dstAvailabilityZone) &&
@@ -426,39 +483,42 @@ const NetworkTopologyPage = () => {
         existing.egressCostUsd += edge.egressCostUsd;
         existing.connectionCount += edge.connectionCount;
         existing.isCrossAz = existing.isCrossAz || isCrossAz;
-        existing.isExternal = existing.isExternal || edge.dstKind === "external";
+        existing.isExternal = existing.isExternal || edge.dstKind === "external" || srcGroup.kind === "external";
         existing.direction = existing.direction === "internal" ? direction : existing.direction;
       } else {
         aggregatedEdges.set(key, {
-          srcId: srcGroup.id,
-          dstId: dstGroup.id,
+          srcId: srcEdgeId,
+          dstId: dstEdgeId,
           bytesSent: edge.bytesSent,
           bytesReceived: edge.bytesReceived,
           egressCostUsd: edge.egressCostUsd,
           connectionCount: edge.connectionCount,
-          isExternal: edge.dstKind === "external",
+          isExternal: edge.dstKind === "external" || srcGroup.kind === "external",
           isCrossAz,
           direction
         });
       }
     });
 
-    const flowEdges: Edge[] = Array.from(aggregatedEdges.values())
-      .filter((edge) => edge.egressCostUsd > costThreshold)
-      .map((edge) => ({
+    const flowEdges: Edge[] = Array.from(aggregatedEdges.values()).map((edge) => ({
         id: `${edge.srcId}->${edge.dstId}`,
         source: edge.srcId,
         target: edge.dstId,
+        type: "step",
         animated: edge.isExternal && edge.direction === "egress",
         label: edgeLabel(edge),
         style: {
           stroke: edgeColor(edge),
-          strokeWidth: edgeWidth(edge)
+          strokeWidth: edgeWidth(edge),
+          strokeDasharray: edge.egressCostUsd < 0.01 && edge.direction === "internal" ? "4 6" : undefined
         },
         labelStyle: {
           fill: "#0f172a",
           fontWeight: 600
-        }
+        },
+        labelBgPadding: [6, 4],
+        labelBgBorderRadius: 6,
+        labelBgStyle: { fill: "rgba(255,255,255,0.9)" }
       }));
 
     const activeNodeIds = new Set<string>();
@@ -468,81 +528,126 @@ const NetworkTopologyPage = () => {
     });
 
     const namespaceMap = new Map<string, Node<ResourceNodeData>[]>();
+    const externalNodes: Node<ResourceNodeData>[] = [];
     nodeMap.forEach((node) => {
       if (!activeNodeIds.has(node.id)) return;
+      if (node.data.kind === "external") {
+        externalNodes.push(node);
+        return;
+      }
       const ns = node.data.namespace || "unknown";
       if (!namespaceMap.has(ns)) namespaceMap.set(ns, []);
       namespaceMap.get(ns)?.push(node);
     });
 
     const namespaceList = Array.from(namespaceMap.keys()).sort((a, b) => a.localeCompare(b));
+    const primaryNamespaces = namespaceList.filter((value) => !isSystemNamespace(value));
+    const systemNamespaces = namespaceList.filter((value) => isSystemNamespace(value));
     const namespaceNodes: Node<NamespaceNodeData>[] = [];
     const childNodes: Node<ResourceNodeData>[] = [];
-    const namespaceColumns = namespaceList.length > 6 ? 3 : 2;
+    const namespaceColumns = primaryNamespaces.length > 6 ? 3 : 2;
     const namespaceColumnWidth = 980;
     const namespaceGap = 40;
-    const rowHeights: number[] = [];
+    const layoutNamespaces = (namespaces: string[], baseY: number) => {
+      const localNamespaceNodes: Node<NamespaceNodeData>[] = [];
+      const localRowHeights: number[] = [];
 
-    namespaceList.forEach((ns, index) => {
-      const children = (namespaceMap.get(ns) ?? []).sort((a, b) => {
-        if (a.data.kind !== b.data.kind) return a.data.kind.localeCompare(b.data.kind);
-        return a.data.title.localeCompare(b.data.title);
+      namespaces.forEach((ns, index) => {
+        const children = (namespaceMap.get(ns) ?? []).sort((a, b) => {
+          if (a.data.kind !== b.data.kind) return a.data.kind.localeCompare(b.data.kind);
+          return a.data.title.localeCompare(b.data.title);
+        });
+
+        const childColumns = Math.min(4, Math.max(2, Math.ceil(Math.sqrt(children.length || 1))));
+        const childRows = Math.max(1, Math.ceil(children.length / childColumns));
+        const groupWidth = Math.max(420, childColumns * nodeSpacing + groupPadding * 2);
+        const groupHeight = childRows * nodeSpacing + groupPadding * 2 + groupHeaderHeight;
+
+        const col = index % namespaceColumns;
+        const row = Math.floor(index / namespaceColumns);
+        localRowHeights[row] = Math.max(localRowHeights[row] ?? 0, groupHeight);
+
+        localNamespaceNodes.push({
+          id: `namespace:${ns}`,
+          type: "namespace",
+          data: { name: ns, count: children.length },
+          position: { x: 0, y: 0 },
+          style: { width: groupWidth, height: groupHeight, zIndex: 0, pointerEvents: "none" },
+          sourcePosition: Position.Top,
+          targetPosition: Position.Bottom,
+          selectable: false,
+          draggable: false
+        });
+
+        children.forEach((node, idx) => {
+          const rowIndex = Math.floor(idx / childColumns);
+          const colIndex = idx % childColumns;
+          node.parentNode = `namespace:${ns}`;
+          node.extent = "parent";
+          node.position = {
+            x: groupPadding + colIndex * nodeSpacing,
+            y: groupPadding + groupHeaderHeight + rowIndex * nodeSpacing
+          };
+          node.style = { ...(node.style ?? {}), zIndex: 2 };
+          node.sourcePosition = Position.Top;
+          node.targetPosition = Position.Bottom;
+          childNodes.push(node);
+        });
       });
 
-      const childColumns = Math.min(4, Math.max(2, Math.ceil(Math.sqrt(children.length || 1))));
-      const childRows = Math.max(1, Math.ceil(children.length / childColumns));
-      const groupWidth = Math.max(420, childColumns * nodeSpacing + groupPadding * 2);
-      const groupHeight = childRows * nodeSpacing + groupPadding * 2 + groupHeaderHeight;
-
-      const col = index % namespaceColumns;
-      const row = Math.floor(index / namespaceColumns);
-      rowHeights[row] = Math.max(rowHeights[row] ?? 0, groupHeight);
-
-      namespaceNodes.push({
-        id: `namespace:${ns}`,
-        type: "namespace",
-        data: { name: ns, count: children.length },
-        position: { x: 0, y: 0 },
-        style: { width: groupWidth, height: groupHeight, zIndex: 0, pointerEvents: "none" },
-        selectable: false,
-        draggable: false
+      const rowOffsets: number[] = [];
+      localRowHeights.forEach((height, idx) => {
+        rowOffsets[idx] = (rowOffsets[idx - 1] ?? 0) + (idx === 0 ? 0 : localRowHeights[idx - 1] + namespaceGap);
       });
 
-      children.forEach((node, idx) => {
-        const rowIndex = Math.floor(idx / childColumns);
-        const colIndex = idx % childColumns;
-        node.parentNode = `namespace:${ns}`;
-        node.extent = "parent";
+      localNamespaceNodes.forEach((node, index) => {
+        const col = index % namespaceColumns;
+        const row = Math.floor(index / namespaceColumns);
         node.position = {
-          x: groupPadding + colIndex * nodeSpacing,
-          y: groupPadding + groupHeaderHeight + rowIndex * nodeSpacing
+          x: col * (namespaceColumnWidth + namespaceGap),
+          y: baseY + (rowOffsets[row] ?? 0)
         };
-        node.style = { ...(node.style ?? {}), zIndex: 2 };
-        childNodes.push(node);
       });
-    });
 
-    const rowOffsets: number[] = [];
-    rowHeights.forEach((height, idx) => {
-      rowOffsets[idx] = (rowOffsets[idx - 1] ?? 0) + (idx === 0 ? 0 : rowHeights[idx - 1] + namespaceGap);
-    });
+      namespaceNodes.push(...localNamespaceNodes);
+      const totalHeight =
+        localRowHeights.length === 0
+          ? 0
+          : localRowHeights.reduce((sum, height) => sum + height, 0) +
+            namespaceGap * (localRowHeights.length - 1);
+      return totalHeight;
+    };
 
-    namespaceNodes.forEach((node, index) => {
-      const col = index % namespaceColumns;
-      const row = Math.floor(index / namespaceColumns);
+    const externalRowColumns = Math.min(6, Math.max(2, externalNodes.length));
+    const externalRowHeight =
+      externalNodes.length === 0
+        ? 0
+        : Math.ceil(externalNodes.length / externalRowColumns) * nodeSpacing + externalRowPadding * 2;
+
+    externalNodes.forEach((node, index) => {
+      const col = index % externalRowColumns;
+      const row = Math.floor(index / externalRowColumns);
       node.position = {
-        x: col * (namespaceColumnWidth + namespaceGap),
-        y: rowOffsets[row] ?? 0
+        x: col * (nodeSpacing + 40),
+        y: externalRowPadding + row * nodeSpacing
       };
+      node.targetPosition = Position.Bottom;
+      node.sourcePosition = Position.Bottom;
     });
 
-    return { nodes: [...namespaceNodes, ...childNodes], edges: flowEdges };
-  }, [data, costThreshold]);
+    const middleStartY = externalRowHeight + tierGap;
+    const middleHeight = layoutNamespaces(primaryNamespaces, middleStartY);
+
+    const systemStartY = middleStartY + Math.max(0, middleHeight) + tierGap;
+    layoutNamespaces(systemNamespaces, systemStartY);
+
+    return { nodes: [...externalNodes, ...namespaceNodes, ...childNodes], edges: flowEdges };
+  }, [data]);
 
   const totalCost = useMemo(() => {
     if (!data?.edges) return 0;
-    return data.edges.reduce((sum, edge) => (edge.egressCostUsd > costThreshold ? sum + edge.egressCostUsd : sum), 0);
-  }, [data, costThreshold]);
+    return data.edges.reduce((sum, edge) => sum + edge.egressCostUsd, 0);
+  }, [data]);
 
   return (
     <div className="space-y-6">
@@ -568,12 +673,55 @@ const NetworkTopologyPage = () => {
               </SelectContent>
             </Select>
           </div>
-          <Input
-            value={namespace}
-            onChange={(event) => setNamespace(event.target.value)}
-            placeholder="Namespace filter"
-            className="w-44"
-          />
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <div className="w-52">
+                <Select value={namespaceCandidate} onValueChange={setNamespaceCandidate}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Add namespace" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {namespaceOptions.map((name) => (
+                      <SelectItem key={name} value={name} disabled={namespaces.includes(name)}>
+                        {name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={addNamespace}
+                disabled={!namespaceCandidate || namespaces.includes(namespaceCandidate)}
+              >
+                Add
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setNamespaces([])} disabled={namespaces.length === 0}>
+                All
+              </Button>
+            </div>
+            {namespaces.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {namespaces.map((name) => (
+                  <Badge key={name} variant="secondary" className="gap-1">
+                    <span>{name}</span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-4 w-4 rounded-full"
+                      onClick={() => removeNamespace(name)}
+                      aria-label={`Remove ${name}`}
+                    >
+                      ×
+                    </Button>
+                  </Badge>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">All namespaces</p>
+            )}
+          </div>
           <Input
             value={String(limit)}
             onChange={(event) => {
@@ -593,6 +741,26 @@ const NetworkTopologyPage = () => {
             placeholder="Min cost $"
             className="w-28"
             inputMode="decimal"
+          />
+          <Input
+            value={minBytesMb.toString()}
+            onChange={(event) => {
+              const parsed = Number(event.target.value);
+              setMinBytesMb(Number.isFinite(parsed) ? Math.max(0, parsed) : 0);
+            }}
+            placeholder="Min MB"
+            className="w-24"
+            inputMode="decimal"
+          />
+          <Input
+            value={minConnections.toString()}
+            onChange={(event) => {
+              const parsed = Number(event.target.value);
+              setMinConnections(Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0);
+            }}
+            placeholder="Min conns"
+            className="w-24"
+            inputMode="numeric"
           />
           <Button onClick={refresh}>Refresh</Button>
         </div>

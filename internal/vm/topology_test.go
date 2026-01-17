@@ -55,11 +55,13 @@ func TestEdgeFromLabelsParsesProtocol(t *testing.T) {
 		"src_pod":               "api-1",
 		"src_node":              "node-a",
 		"src_ip":                "10.0.0.1",
+		"src_dns_name":          "api.internal.local",
 		"src_availability_zone": "us-east-1a",
 		"dst_namespace":         "payments",
 		"dst_pod":               "db-1",
 		"dst_node":              "node-b",
 		"dst_ip":                "10.0.0.2",
+		"dst_dns_name":          "db.internal.local",
 		"dst_availability_zone": "us-east-1b",
 		"dst_kind":              "pod",
 		"service_match":         "endpoint",
@@ -75,5 +77,8 @@ func TestEdgeFromLabelsParsesProtocol(t *testing.T) {
 	}
 	if edge.SrcAZ != "us-east-1a" || edge.DstAZ != "us-east-1b" {
 		t.Fatalf("unexpected AZs: %s %s", edge.SrcAZ, edge.DstAZ)
+	}
+	if edge.SrcDNSName != "api.internal.local" || edge.DstDNSName != "db.internal.local" {
+		t.Fatalf("unexpected dns names: %s %s", edge.SrcDNSName, edge.DstDNSName)
 	}
 }

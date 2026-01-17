@@ -3,6 +3,7 @@ package vm
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"github.com/clustercost/clustercost-dashboard/internal/config"
+	"github.com/clustercost/clustercost-dashboard/internal/store"
 	agentv1 "github.com/clustercost/clustercost-dashboard/internal/proto/agent/v1"
 )
 
@@ -259,11 +261,46 @@ func (i *Ingestor) appendReport(buf *bytes.Buffer, env reportEnvelope) {
 	type nsAgg struct {
 		hourlyCost      float64
 		podCount        int64
-		cpuUsageSeconds float64
+		cpuUsageMilli   int64
 		memoryRssBytes  int64
+		cpuReqMilli     int64
+		memReqBytes     int64
 	}
 	// map[namespace]*nsAgg
 	nsMap := make(map[string]*nsAgg)
+	pricing := store.NewPricingCatalog(nil)
+	region := req.Region
+	if region == "" {
+		region = req.AvailabilityZone
+	}
+	if region == "" {
+		region = "us-east-1"
+	}
+	instanceType := req.InstanceType
+	if instanceType == "" {
+		instanceType = "default"
+	}
+	vcpus := int64(0)
+	ramBytes := int64(0)
+	if req.NodeName != "" {
+		for _, node := range req.Nodes {
+			if node == nil || node.NodeName != req.NodeName {
+				continue
+			}
+			if node.CapacityCpuMillicores > 0 {
+				vcpus = int64(node.CapacityCpuMillicores / 1000)
+			} else if node.AllocatableCpuMillicores > 0 {
+				vcpus = int64(node.AllocatableCpuMillicores / 1000)
+			}
+			if node.CapacityMemoryBytes > 0 {
+				ramBytes = int64(node.CapacityMemoryBytes)
+			} else if node.AllocatableMemoryBytes > 0 {
+				ramBytes = int64(node.AllocatableMemoryBytes)
+			}
+			break
+		}
+	}
+	cpuPrice, memPrice := pricing.GetNodeResourcePrices(context.Background(), region, instanceType, vcpus, ramBytes)
 
 	for _, pod := range req.Pods {
 		if pod == nil {
@@ -294,13 +331,11 @@ func (i *Ingestor) appendReport(buf *bytes.Buffer, env reportEnvelope) {
 
 		// Calculate Totals and Costs
 		// CPU
-		cpuSeconds := float64(0)
+		cpuUsageMilli := int64(0)
 		cpuReq := int64(0)
 		cpuLim := int64(0)
 		if pod.Cpu != nil {
-			// usage_user_ns + usage_kernel_ns
-			ns := pod.Cpu.UsageUserNs + pod.Cpu.UsageKernelNs
-			cpuSeconds = float64(ns) / 1e9
+			cpuUsageMilli = int64(pod.Cpu.UsageMillicores)
 			cpuReq = int64(pod.Cpu.RequestMillicores)
 			cpuLim = int64(pod.Cpu.LimitMillicores)
 		}
@@ -325,7 +360,7 @@ func (i *Ingestor) appendReport(buf *bytes.Buffer, env reportEnvelope) {
 			egressPublic = int64(pod.Network.EgressPublicBytes)
 		}
 
-		writeSample(buf, "clustercost_pod_cpu_usage_seconds_total", podLabels, formatFloat(cpuSeconds), tsMillis)
+		writeSample(buf, "clustercost_pod_cpu_usage_milli", podLabels, formatInt(cpuUsageMilli), tsMillis)
 		writeSample(buf, "clustercost_pod_cpu_request_millicores", podLabels, formatInt(cpuReq), tsMillis)
 		writeSample(buf, "clustercost_pod_cpu_limit_millicores", podLabels, formatInt(cpuLim), tsMillis)
 
@@ -337,31 +372,71 @@ func (i *Ingestor) appendReport(buf *bytes.Buffer, env reportEnvelope) {
 		writeSample(buf, "clustercost_pod_network_rx_bytes_total", podLabels, formatInt(netRx), tsMillis)
 		writeSample(buf, "clustercost_pod_network_egress_public_bytes_total", podLabels, formatInt(egressPublic), tsMillis)
 
+		cpuReqCores := float64(cpuReq) / 1000.0
+		memReqGB := float64(memReq) / (1024 * 1024 * 1024)
+		hourlyCost := (cpuReqCores * cpuPrice) + (memReqGB * memPrice)
+		writeSample(buf, "clustercost_pod_hourly_cost", podLabels, formatFloat(hourlyCost), tsMillis)
+
 		// Aggregate for Namespace
 		if nsMap[pod.Namespace] == nil {
 			nsMap[pod.Namespace] = &nsAgg{}
 		}
 		agg := nsMap[pod.Namespace]
 		agg.podCount++
-		agg.cpuUsageSeconds += cpuSeconds
+		agg.cpuUsageMilli += cpuUsageMilli
 		agg.memoryRssBytes += memBytes
+		agg.hourlyCost += hourlyCost
+		agg.cpuReqMilli += cpuReq
+		agg.memReqBytes += memReq
 	}
 
 	// 3. Emit Aggregated Namespace Metrics
 	for ns, agg := range nsMap {
 		nsLabels := appendLabels(base,
 			label{"namespace", ns},
-			// label{"environment", ...} // Implicit aggregation?
+			label{"environment", "production"},
 		)
 		writeSample(buf, "clustercost_namespace_pod_count", nsLabels, formatInt(agg.podCount), tsMillis)
-		writeSample(buf, "clustercost_namespace_cpu_usage_seconds_total", nsLabels, formatFloat(agg.cpuUsageSeconds), tsMillis)
+		writeSample(buf, "clustercost_namespace_cpu_usage_milli", nsLabels, formatInt(agg.cpuUsageMilli), tsMillis)
 		writeSample(buf, "clustercost_namespace_memory_rss_bytes_total", nsLabels, formatInt(agg.memoryRssBytes), tsMillis)
+		writeSample(buf, "clustercost_namespace_hourly_cost", nsLabels, formatFloat(agg.hourlyCost), tsMillis)
+		writeSample(buf, "clustercost_namespace_cpu_request_millicores", nsLabels, formatInt(agg.cpuReqMilli), tsMillis)
+		writeSample(buf, "clustercost_namespace_memory_request_bytes", nsLabels, formatInt(agg.memReqBytes), tsMillis)
+	}
+
+	// 3b. Emit Node Metrics
+	for _, node := range req.Nodes {
+		if node == nil || node.NodeName == "" {
+			continue
+		}
+		nodeLabels := appendLabels(base, label{"node", node.NodeName})
+		if node.NodeName == req.NodeName && req.InstanceType != "" {
+			nodeLabels = appendLabels(nodeLabels, label{"instance_type", req.InstanceType})
+		}
+
+		writeSample(buf, "clustercost_node_cpu_usage_milli", nodeLabels, formatUint(node.CpuUsageMillicores), tsMillis)
+		writeSample(buf, "clustercost_node_memory_usage_bytes", nodeLabels, formatUint(node.MemoryUsageBytes), tsMillis)
+		writeSample(buf, "clustercost_node_cpu_capacity_milli", nodeLabels, formatUint(node.CapacityCpuMillicores), tsMillis)
+		writeSample(buf, "clustercost_node_memory_capacity_bytes", nodeLabels, formatUint(node.CapacityMemoryBytes), tsMillis)
+		writeSample(buf, "clustercost_node_cpu_allocatable_milli", nodeLabels, formatUint(node.AllocatableCpuMillicores), tsMillis)
+		writeSample(buf, "clustercost_node_memory_allocatable_bytes", nodeLabels, formatUint(node.AllocatableMemoryBytes), tsMillis)
+		writeSample(buf, "clustercost_node_cpu_requested_milli", nodeLabels, formatUint(node.RequestedCpuMillicores), tsMillis)
+		writeSample(buf, "clustercost_node_memory_requested_bytes", nodeLabels, formatUint(node.RequestedMemoryBytes), tsMillis)
+		writeSample(buf, "clustercost_node_cpu_throttling_ns_total", nodeLabels, formatUint(node.ThrottlingNs), tsMillis)
+
+		if node.AllocatableCpuMillicores > 0 {
+			cpuPct := (float64(node.CpuUsageMillicores) / float64(node.AllocatableCpuMillicores)) * 100
+			writeSample(buf, "clustercost_node_cpu_usage_percent", nodeLabels, formatFloat(cpuPct), tsMillis)
+		}
+		if node.AllocatableMemoryBytes > 0 {
+			memPct := (float64(node.MemoryUsageBytes) / float64(node.AllocatableMemoryBytes)) * 100
+			writeSample(buf, "clustercost_node_memory_usage_percent", nodeLabels, formatFloat(memPct), tsMillis)
+		}
 	}
 
 	// 4. Emit Connection-Level Network Metrics
 	var totalTx uint64
 	var totalRx uint64
-	var totalEgressCost float64
 	for _, conn := range req.Connections {
 		if conn == nil {
 			continue
@@ -370,17 +445,14 @@ func (i *Ingestor) appendReport(buf *bytes.Buffer, env reportEnvelope) {
 		labels := connectionLabels(base, conn)
 		writeSample(buf, "clustercost_connection_bytes_sent_total", labels, formatUint(conn.BytesSent), tsMillis)
 		writeSample(buf, "clustercost_connection_bytes_received_total", labels, formatUint(conn.BytesReceived), tsMillis)
-		writeSample(buf, "clustercost_connection_egress_cost_usd_total", labels, formatFloat(conn.EgressCostUsd), tsMillis)
 
 		totalTx += conn.BytesSent
 		totalRx += conn.BytesReceived
-		totalEgressCost += conn.EgressCostUsd
 	}
 
-	if totalTx > 0 || totalRx > 0 || totalEgressCost > 0 {
+	if totalTx > 0 || totalRx > 0 {
 		writeSample(buf, "clustercost_cluster_network_tx_bytes_total", base, formatUint(totalTx), tsMillis)
 		writeSample(buf, "clustercost_cluster_network_rx_bytes_total", base, formatUint(totalRx), tsMillis)
-		writeSample(buf, "clustercost_cluster_network_egress_cost_total", base, formatFloat(totalEgressCost), tsMillis)
 	}
 }
 
@@ -537,6 +609,7 @@ func endpointLabels(prefix string, ep *agentv1.NetworkEndpoint) []label {
 		{prefix + "_pod", ep.PodName},
 		{prefix + "_node", ep.NodeName},
 		{prefix + "_availability_zone", ep.AvailabilityZone},
+		{prefix + "_dns_name", ep.DnsName},
 	}
 }
 

@@ -78,8 +78,10 @@ type NamespaceSummary struct {
 	HourlyCost         float64           `json:"hourlyCost"`
 	PodCount           int               `json:"podCount"`
 	CPURequestMilli    int64             `json:"cpuRequestMilli"`
+	CPULimitMilli      int64             `json:"cpuLimitMilli"`
 	MemoryRequestBytes int64             `json:"memoryRequestBytes"`
 	CPUUsageMilli      int64             `json:"cpuUsageMilli"`
+	CPUUsagePercent    float64           `json:"cpuUsagePercent"`
 	MemoryUsageBytes   int64             `json:"memoryUsageBytes"`
 	Labels             map[string]string `json:"labels"`
 	Environment        string            `json:"environment"`
@@ -162,11 +164,13 @@ type NetworkEdge struct {
 	SrcPodName      string  `json:"srcPodName"`
 	SrcNodeName     string  `json:"srcNodeName"`
 	SrcIP           string  `json:"srcIp"`
+	SrcDNSName      string  `json:"srcDnsName"`
 	SrcAZ           string  `json:"srcAvailabilityZone"`
 	DstNamespace    string  `json:"dstNamespace"`
 	DstPodName      string  `json:"dstPodName"`
 	DstNodeName     string  `json:"dstNodeName"`
 	DstIP           string  `json:"dstIp"`
+	DstDNSName      string  `json:"dstDnsName"`
 	DstAZ           string  `json:"dstAvailabilityZone"`
 	DstKind         string  `json:"dstKind"`
 	ServiceMatch    string  `json:"serviceMatch"`
@@ -182,11 +186,15 @@ type NetworkEdge struct {
 
 // NetworkTopologyOptions controls topology queries.
 type NetworkTopologyOptions struct {
-	ClusterID string
-	Namespace string
-	Start     time.Time
-	End       time.Time
-	Limit     int
+	ClusterID      string
+	Namespace      string
+	Namespaces     []string
+	Start          time.Time
+	End            time.Time
+	Limit          int
+	MinCostUSD     float64
+	MinBytes       int64
+	MinConnections int64
 }
 
 // AgentDatasetHealth summarizes data availability per dataset.
@@ -825,18 +833,19 @@ func (s *Store) aggregateNamespacesLocked() (map[string]*NamespaceSummary, error
 
 		for _, pod := range snap.Report.Pods {
 			haveData = true
-			if pod.Namespace == "" {
+			namespace := strings.TrimSpace(pod.Namespace)
+			if namespace == "" {
 				continue
 			}
 
-			entry, ok := collector[pod.Namespace]
+			entry, ok := collector[namespace]
 			if !ok {
 				entry = &NamespaceSummary{
-					Namespace:   pod.Namespace,
+					Namespace:   namespace,
 					Labels:      make(map[string]string),
 					Environment: "production",
 				}
-				collector[pod.Namespace] = entry
+				collector[namespace] = entry
 			}
 
 			// Aggregate Costs
@@ -846,33 +855,57 @@ func (s *Store) aggregateNamespacesLocked() (map[string]*NamespaceSummary, error
 			}
 			memGB := float64(memUsageBytes) / (1024 * 1024 * 1024)
 
-			// CPU Usage (Cores)
-			// We need rate. Snapshot only has cumulative usage_ns.
-			// Without rate, we can't do accurate CPU cost.
-			// Currently returning 0.0 for CPU cost as placeholder.
+			// CPU Usage (Cores) - provided as millicores in the report
 			cpuUsageCores := 0.0
+			if pod.Cpu != nil {
+				cpuUsageCores = float64(pod.Cpu.UsageMillicores) / 1000.0
+			}
 
-			// Network Cost (Egress)
-			// Assume EgressPublicBytes is cumulative Counter.
-			// To get "Hourly Cost", strictly we need rate.
-			// But for "Billable Egress", we usually equate "Traffic sent * Price".
-			// If this is a snapshot, we might be double counting if we just sum total counter * price every scrape.
-			// CORRECT LOGIC: Cost = (CurrentCounter - PrevCounter) * Price.
-			// For this MVP, we will skip Network Cost in "Hourly Rate" display to avoid massive inflation from cumulative counters,
-			// OR we assume the agent sends "bytes sent in last report interval"?
-			// Proto says "egress_public_bytes". Standard prometheus is cumulative.
-			// logic.
-			// Given urgency, 0.0 is safer than wrong.
+			// Network Cost (Egress) - Simplified for MVP
 			egressPublicGB := 0.0
 			egressCrossAZGB := 0.0
 
 			// Calculate Total Hourly Cost Rate
-			// Cost = (Cores * Price/Core) + (GB * Price/GB) + (NetworkGB/hr * Price/GB)
 			hourCost := calculateHourlyCost(cpuUsageCores, memGB, egressPublicGB, egressCrossAZGB, cpuPrice, memPrice)
 
 			entry.HourlyCost += hourCost
 			entry.MemoryUsageBytes += memUsageBytes
+			if pod.Cpu != nil {
+				entry.CPUUsageMilli += int64(pod.Cpu.UsageMillicores)
+			}
+			if pod.Cpu != nil {
+				entry.CPURequestMilli += int64(pod.Cpu.RequestMillicores)
+				entry.CPULimitMilli += int64(pod.Cpu.LimitMillicores)
+			}
+			if pod.Memory != nil {
+				entry.MemoryRequestBytes += int64(pod.Memory.RequestBytes)
+			}
 			entry.PodCount++
+		}
+	}
+
+	// Post-processing: Calculate Percentages based on Totals
+	for _, ns := range collector {
+		// Priority: Limit > Request > Node Capacity (Estimate)
+		denominator := float64(ns.CPULimitMilli)
+		if denominator == 0 {
+			denominator = float64(ns.CPURequestMilli)
+		}
+
+		// If still 0, try to estimate from node capacity?
+		// Since we don't have per-namespace node binding easily accessible here (pods are mixed),
+		// we skip Node Capacity fallback for Namespace-level % to avoid confusion. Checks against Request are standard efficiency.
+		// NOTE: User prompt mentioned "fallback to Node Capacity" for *Pod* calculation.
+		// aggregated, it's safer to stick to configured resources.
+
+		if denominator > 0 {
+			ns.CPUUsagePercent = (float64(ns.CPUUsageMilli) / denominator) * 100
+		} else {
+			// Last resort: If usage > 0 but no limit/request, cap at 100? Or leave 0?
+			// If we have usage but no request, it's infinite efficiency or undefined.
+			// Let's leave it 0 or set to computed "share of cluster" elsewhere.
+			// For now, 0 logic is consistent if "unbounded".
+			ns.CPUUsagePercent = 0
 		}
 	}
 

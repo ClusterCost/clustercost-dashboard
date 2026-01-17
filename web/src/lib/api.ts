@@ -72,7 +72,9 @@ type NamespaceCostRecordApi = {
   hourlyCost: number;
   podCount: number;
   cpuRequestMilli: number;
+  cpuLimitMilli: number;
   cpuUsageMilli: number;
+  cpuUsagePercent?: number;
   memoryRequestBytes: number;
   memoryUsageBytes: number;
   labels?: Record<string, string>;
@@ -90,7 +92,9 @@ export interface NamespaceCostRecord {
   hourlyCost: number;
   podCount: number;
   cpuRequestMilli: number;
+  cpuLimitMilli: number;
   cpuUsageMilli: number;
+  cpuUsagePercent: number;
   memoryRequestBytes: number;
   memoryUsageBytes: number;
   labels: Record<string, string>;
@@ -208,11 +212,13 @@ export type NetworkEdge = {
   srcPodName: string;
   srcNodeName: string;
   srcIp: string;
+  srcDnsName?: string;
   srcAvailabilityZone: string;
   dstNamespace: string;
   dstPodName: string;
   dstNodeName: string;
   dstIp: string;
+  dstDnsName?: string;
   dstAvailabilityZone: string;
   dstKind: string;
   serviceMatch: string;
@@ -318,7 +324,9 @@ export const fetchNamespaces = async (): Promise<NamespacesResponse> => {
     records: resp.items.map((record) => ({
       ...record,
       labels: record.labels ?? {},
-      environment: normalizeEnvironment(record.environment)
+      environment: normalizeEnvironment(record.environment),
+      cpuLimitMilli: record.cpuLimitMilli ?? 0,
+      cpuUsagePercent: record.cpuUsagePercent ?? 0
     }))
   };
 };
@@ -351,21 +359,30 @@ export const fetchAgentStatus = () => request<AgentStatusResponse>("/agent");
 
 export type NetworkTopologyParams = {
   clusterId?: string;
-  namespace?: string;
+  namespace?: string | string[];
   lookback?: string;
   start?: string | number;
   end?: string | number;
   limit?: number;
+  minCost?: number;
+  minBytes?: number;
+  minConnections?: number;
 };
 
 export const fetchNetworkTopology = async (params: NetworkTopologyParams): Promise<NetworkTopologyResponse> => {
   const search = new URLSearchParams();
   if (params.clusterId) search.set("clusterId", params.clusterId);
-  if (params.namespace) search.set("namespace", params.namespace);
+  if (params.namespace) {
+    const value = Array.isArray(params.namespace) ? params.namespace.join(",") : params.namespace;
+    search.set("namespace", value);
+  }
   if (params.lookback) search.set("lookback", params.lookback);
   if (params.start !== undefined) search.set("start", String(params.start));
   if (params.end !== undefined) search.set("end", String(params.end));
   if (params.limit !== undefined) search.set("limit", String(params.limit));
+  if (params.minCost !== undefined) search.set("minCost", String(params.minCost));
+  if (params.minBytes !== undefined) search.set("minBytes", String(params.minBytes));
+  if (params.minConnections !== undefined) search.set("minConnections", String(params.minConnections));
 
   const query = search.toString();
   return request<NetworkTopologyResponse>(`/network/topology${query ? `?${query}` : ""}`);

@@ -8,8 +8,13 @@ AGENT_URLS ?=
 BIN_DIR ?= $(PWD)/bin
 BINARY ?= $(BIN_DIR)/clustercost
 
+PROTOC ?= protoc
+
 proto:
-	protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative internal/proto/agent/v1/agent.proto
+	PATH="$(shell go env GOPATH)/bin:$$PATH" $(PROTOC) -I internal/proto \
+		--go_out=paths=source_relative:internal/proto \
+		--go-grpc_out=paths=source_relative:internal/proto \
+		internal/proto/agent/v1/agent.proto
 
 dev-backend:
 	$(BACKEND_ENV) AGENT_URLS=$(AGENT_URLS) go run ./cmd/dashboard

@@ -62,7 +62,7 @@ func TestReport_Unary(t *testing.T) {
 				{
 					Namespace: "default",
 					PodName:   "pod-1",
-					Cpu:       &agentv1.CpuMetrics{UsageUserNs: 1000},
+					Cpu:       &agentv1.CpuMetrics{UsageMillicores: 250},
 				},
 			},
 		}
