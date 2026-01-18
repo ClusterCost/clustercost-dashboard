@@ -2,19 +2,22 @@ package main
 
 import (
 	"context"
-	"fmt"
-	"log"
+	"flag"
 	"net/http"
 	"os/signal"
 	"strings"
 	"syscall"
 	"time"
 
-	"github.com/clustercost/clustercost-dashboard/internal/agents"
 	"github.com/clustercost/clustercost-dashboard/internal/api"
+	"github.com/clustercost/clustercost-dashboard/internal/auth"
 	"github.com/clustercost/clustercost-dashboard/internal/config"
+	"github.com/clustercost/clustercost-dashboard/internal/db"
+	"github.com/clustercost/clustercost-dashboard/internal/finops"
+	ccgrpc "github.com/clustercost/clustercost-dashboard/internal/grpc"
 	"github.com/clustercost/clustercost-dashboard/internal/logging"
 	"github.com/clustercost/clustercost-dashboard/internal/store"
+	"github.com/clustercost/clustercost-dashboard/internal/vm"
 )
 
 func main() {
@@ -25,37 +28,66 @@ func main() {
 		logger.Fatalf("load config: %v", err)
 	}
 
-	s := store.New(cfg.Agents, cfg.RecommendedAgentVersion)
-	client := agents.NewClient(10 * time.Second)
+	logLevel := flag.String("log-level", "", "Set the logging level (info, debug)")
+	flag.Parse()
+
+	if *logLevel != "" {
+		cfg.LogLevel = strings.ToLower(*logLevel)
+	}
+	logger.Printf("Configured Log Level: %s", cfg.LogLevel)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	go func() {
-		ticker := time.NewTicker(cfg.PollInterval)
-		defer ticker.Stop()
-		logger.Printf("starting poller with interval %s", cfg.PollInterval)
-		for {
-			if err := pollAgents(ctx, client, s, cfg, logger); err != nil {
-				logger.Printf("poll error: %v", err)
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-			}
-		}
-	}()
+	vmClient, err := vm.NewClient(cfg)
+	if err != nil {
+		logger.Fatalf("victoria metrics query setup error: %v", err)
+	}
+
+	sqlite, err := db.New(cfg.StoragePath)
+	if err != nil {
+		logger.Fatalf("sqlite setup error: %v", err)
+	}
+	defer func() { _ = sqlite.Close() }()
+
+	// Initialize In-Memory Store
+	st := store.New(cfg.Agents, cfg.RecommendedAgentVersion)
+
+	// Initialize FinOps Engine
+	finopsEngine := finops.NewEngine(vmClient, st.PricingCatalog())
+
+	auth.SetSecret(cfg.JWTSecret)
 
 	srv := &http.Server{
-		Addr:    cfg.ListenAddr,
-		Handler: api.NewRouter(s),
+		Addr:              cfg.ListenAddr,
+		Handler:           api.NewRouter(vmClient, sqlite, st, finopsEngine),
+		ReadHeaderTimeout: 5 * time.Second,
 	}
+
+	vmIngestor, err := vm.NewIngestor(cfg, logger)
+	if err != nil {
+		logger.Fatalf("victoria metrics setup error: %v", err)
+	}
+	if vmIngestor != nil {
+		defer vmIngestor.Stop()
+		logger.Printf("victoria metrics ingest enabled")
+	}
+
+	// Pass store to gRPC server so it can receive reports
+	grpcSrv := ccgrpc.NewServer(cfg, vmIngestor, st)
+	go func() {
+		logger.Printf("gRPC receiver initialized")
+		logger.Printf("gRPC listening on %s", cfg.GrpcAddr)
+		if err := grpcSrv.ListenAndServe(cfg.GrpcAddr); err != nil {
+			logger.Fatalf("grpc server error: %v", err)
+		}
+	}()
 
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+		grpcSrv.Stop()
 		_ = srv.Shutdown(shutdownCtx)
 	}()
 
@@ -63,53 +95,4 @@ func main() {
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		logger.Fatalf("server error: %v", err)
 	}
-}
-
-func pollAgents(ctx context.Context, client *agents.Client, s *store.Store, cfg config.Config, logger *log.Logger) error {
-	for _, agent := range cfg.Agents {
-		snapshot := scrapeAgent(ctx, client, agent)
-		if snapshot.LastError != "" {
-			logger.Printf("agent %s error: %s", agent.Name, snapshot.LastError)
-		}
-		s.Update(agent.Name, snapshot)
-	}
-	return nil
-}
-
-func scrapeAgent(ctx context.Context, client *agents.Client, cfg config.AgentConfig) store.AgentSnapshot {
-	agentCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-
-	snapshot := store.AgentSnapshot{LastScrape: time.Now()}
-	var errs []string
-
-	if health, err := client.FetchHealth(agentCtx, cfg.BaseURL); err != nil {
-		errs = append(errs, fmt.Sprintf("health: %v", err))
-	} else {
-		snapshot.Health = &health
-	}
-
-	if namespaces, err := client.FetchNamespaces(agentCtx, cfg.BaseURL); err != nil {
-		errs = append(errs, fmt.Sprintf("namespaces: %v", err))
-	} else {
-		snapshot.Namespaces = &namespaces
-	}
-
-	if nodes, err := client.FetchNodes(agentCtx, cfg.BaseURL); err != nil {
-		errs = append(errs, fmt.Sprintf("nodes: %v", err))
-	} else {
-		snapshot.Nodes = &nodes
-	}
-
-	if resources, err := client.FetchResources(agentCtx, cfg.BaseURL); err != nil {
-		errs = append(errs, fmt.Sprintf("resources: %v", err))
-	} else {
-		snapshot.Resources = &resources
-	}
-
-	if len(errs) > 0 {
-		snapshot.LastError = strings.Join(errs, "; ")
-	}
-
-	return snapshot
 }

@@ -13,3 +13,8 @@ internal/static/dist/*
 .DS_Store
 .vscode/
 .idea/
+
+/dashboard
+.env
+
+data/clustercost.db

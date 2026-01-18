@@ -72,7 +72,9 @@ type NamespaceCostRecordApi = {
   hourlyCost: number;
   podCount: number;
   cpuRequestMilli: number;
+  cpuLimitMilli: number;
   cpuUsageMilli: number;
+  cpuUsagePercent?: number;
   memoryRequestBytes: number;
   memoryUsageBytes: number;
   labels?: Record<string, string>;
@@ -90,7 +92,9 @@ export interface NamespaceCostRecord {
   hourlyCost: number;
   podCount: number;
   cpuRequestMilli: number;
+  cpuLimitMilli: number;
   cpuUsageMilli: number;
+  cpuUsagePercent: number;
   memoryRequestBytes: number;
   memoryUsageBytes: number;
   labels: Record<string, string>;
@@ -203,14 +207,99 @@ export interface HealthResponse {
   timestamp: string;
 }
 
-async function request<T>(path: string): Promise<T> {
-  const response = await fetch(`${API_PREFIX}${path}`);
+export type NetworkEdge = {
+  srcNamespace: string;
+  srcPodName: string;
+  srcNodeName: string;
+  srcIp: string;
+  srcDnsName?: string;
+  srcAvailabilityZone: string;
+  dstNamespace: string;
+  dstPodName: string;
+  dstNodeName: string;
+  dstIp: string;
+  dstDnsName?: string;
+  dstAvailabilityZone: string;
+  dstKind: string;
+  serviceMatch: string;
+  dstServices: string;
+  protocol: number;
+  bytesSent: number;
+  bytesReceived: number;
+  egressCostUsd: number;
+  connectionCount: number;
+  firstSeen: number;
+  lastSeen: number;
+};
+
+export type NetworkTopologyResponse = {
+  clusterId: string;
+  namespace?: string;
+  start: string;
+  end: string;
+  edges: NetworkEdge[];
+  totalEdges: number;
+  requestedLimit: number;
+  timestamp: string;
+};
+
+let authToken: string | null = null;
+let unauthorizedHandler: (() => void) | null = null;
+
+export const setAuthToken = (token: string | null) => {
+  authToken = token;
+};
+
+export const setUnauthorizedHandler = (handler: (() => void) | null) => {
+  unauthorizedHandler = handler;
+};
+
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const headers = new Headers(options.headers);
+  if (authToken) {
+    headers.set("Authorization", `Bearer ${authToken}`);
+  }
+
+  const response = await fetch(`${API_PREFIX}${path}`, {
+    ...options,
+    headers,
+  });
+
+  if (response.status === 401) {
+    setAuthToken(null);
+    unauthorizedHandler?.();
+    throw new Error("Unauthorized");
+  }
+
   if (!response.ok) {
     const text = await response.text();
     throw new Error(text || `Request failed with ${response.status}`);
   }
   return response.json();
 }
+
+export interface AgentInfo {
+  name: string;
+  baseUrl: string;
+  status: string;
+  lastScrapeTime: string;
+  error?: string;
+  clusterId?: string;
+  nodeName?: string;
+}
+
+export const fetchAgents = async (): Promise<AgentInfo[]> => {
+  return request<AgentInfo[]>("/agents");
+};
+
+export const login = async (username: string, password: string): Promise<{ token: string }> => {
+  const resp = await request<{ token: string }>("/login", {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+    headers: { "Content-Type": "application/json" },
+  });
+  return resp;
+};
 
 export const fetchOverview = async (): Promise<OverviewResponse> => {
   const resp = await request<OverviewResponseApi>("/cost/overview");
@@ -235,7 +324,9 @@ export const fetchNamespaces = async (): Promise<NamespacesResponse> => {
     records: resp.items.map((record) => ({
       ...record,
       labels: record.labels ?? {},
-      environment: normalizeEnvironment(record.environment)
+      environment: normalizeEnvironment(record.environment),
+      cpuLimitMilli: record.cpuLimitMilli ?? 0,
+      cpuUsagePercent: record.cpuUsagePercent ?? 0
     }))
   };
 };
@@ -265,3 +356,34 @@ export const fetchResources = async (): Promise<ResourcesSummary> => {
 
 export const fetchHealth = () => request<HealthResponse>("/health");
 export const fetchAgentStatus = () => request<AgentStatusResponse>("/agent");
+
+export type NetworkTopologyParams = {
+  clusterId?: string;
+  namespace?: string | string[];
+  lookback?: string;
+  start?: string | number;
+  end?: string | number;
+  limit?: number;
+  minCost?: number;
+  minBytes?: number;
+  minConnections?: number;
+};
+
+export const fetchNetworkTopology = async (params: NetworkTopologyParams): Promise<NetworkTopologyResponse> => {
+  const search = new URLSearchParams();
+  if (params.clusterId) search.set("clusterId", params.clusterId);
+  if (params.namespace) {
+    const value = Array.isArray(params.namespace) ? params.namespace.join(",") : params.namespace;
+    search.set("namespace", value);
+  }
+  if (params.lookback) search.set("lookback", params.lookback);
+  if (params.start !== undefined) search.set("start", String(params.start));
+  if (params.end !== undefined) search.set("end", String(params.end));
+  if (params.limit !== undefined) search.set("limit", String(params.limit));
+  if (params.minCost !== undefined) search.set("minCost", String(params.minCost));
+  if (params.minBytes !== undefined) search.set("minBytes", String(params.minBytes));
+  if (params.minConnections !== undefined) search.set("minConnections", String(params.minConnections));
+
+  const query = search.toString();
+  return request<NetworkTopologyResponse>(`/network/topology${query ? `?${query}` : ""}`);
+};

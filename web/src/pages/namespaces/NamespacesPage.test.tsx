@@ -10,6 +10,13 @@ vi.mock("../../hooks/useApiData", () => ({
   useApiData: (fetcher: any) => mockUseApiData(fetcher)
 }));
 
+// Mock ResizeObserver
+global.ResizeObserver = class ResizeObserver {
+  observe() { }
+  unobserve() { }
+  disconnect() { }
+};
+
 const sampleNamespace = {
   clusterId: "cluster",
   namespace: "payments",
@@ -43,7 +50,12 @@ describe("NamespacesPage", () => {
 
     render(<NamespacesPage />);
 
-    expect(screen.getByText("payments")).toBeInTheDocument();
-    expect(screen.getByText("$10")).toBeInTheDocument();
+    // "payments" appears in Summary Card, Treemap, Optimization List, and Table.
+    // Let's verify it exists at least once.
+    expect(screen.getAllByText("payments")[0]).toBeInTheDocument();
+
+    // Hourly cost 10 * 720 hours = $7,200
+    // It appears in Total Monthly, Cost Treemap, etc.
+    expect(screen.getAllByText("$7,200")[0]).toBeInTheDocument();
   });
 });

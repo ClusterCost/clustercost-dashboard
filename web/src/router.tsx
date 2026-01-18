@@ -6,6 +6,9 @@ import NodesPage from "./pages/nodes/NodesPage";
 import ResourcesPage from "./pages/resources/ResourcesPage";
 import AgentsPage from "./pages/AgentsPage";
 import ConnectCloudPage from "./pages/ConnectCloudPage";
+import LoginPage from "./pages/LoginPage";
+import NetworkTopologyPage from "./pages/network/NetworkTopologyPage";
+import ProtectedRoute from "./components/layout/ProtectedRoute";
 import RouteError from "./components/layout/RouteError";
 
 const router = createBrowserRouter([
@@ -14,12 +17,22 @@ const router = createBrowserRouter([
     element: <App />,
     errorElement: <RouteError />,
     children: [
-      { index: true, element: <OverviewPage /> },
-      { path: "namespaces", element: <NamespacesPage /> },
-      { path: "nodes", element: <NodesPage /> },
-      { path: "resources", element: <ResourcesPage /> },
-      { path: "agents", element: <AgentsPage /> },
-      { path: "connect-cloud", element: <ConnectCloudPage /> }
+      {
+        path: "login",
+        element: <LoginPage />
+      },
+      {
+        element: <ProtectedRoute />,
+        children: [
+          { index: true, element: <OverviewPage /> },
+          { path: "namespaces", element: <NamespacesPage /> },
+          { path: "nodes", element: <NodesPage /> },
+          { path: "resources", element: <ResourcesPage /> },
+          { path: "network", element: <NetworkTopologyPage /> },
+          { path: "agents", element: <AgentsPage /> },
+          { path: "connect-cloud", element: <ConnectCloudPage /> }
+        ]
+      }
     ]
   }
 ]);
