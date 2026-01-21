@@ -198,10 +198,8 @@ func (c *Client) Resources(ctx context.Context) (store.ResourcesPayload, error) 
 	if err != nil && err != ErrNoData {
 		return store.ResourcesPayload{}, err
 	}
-	nodeHourlyCost, _, err := c.scalarMetric(ctx, "clustercost_cluster_total_node_hourly_cost")
-	if err != nil && err != ErrNoData {
-		return store.ResourcesPayload{}, err
-	}
+	// Node Hourly Cost is now fully calculated, no stored metric
+	nodeHourlyCost := 0.0
 
 	// Fetch Network Metrics
 	netTx, _, _ := c.scalarMetric(ctx, "clustercost_cluster_network_tx_bytes_total")
@@ -432,7 +430,7 @@ func (c *Client) AgentStatus(ctx context.Context) (store.AgentStatusPayload, err
 	}
 
 	nsTS := c.seriesTimestampSafe(ctx, "clustercost_namespace_hourly_cost")
-	nodeTS := c.seriesTimestampSafe(ctx, "clustercost_node_hourly_cost")
+	nodeTS := c.seriesTimestampSafe(ctx, "clustercost_node_cpu_allocatable_milli")
 	resTS := c.seriesTimestampSafe(ctx, "clustercost_cluster_cpu_usage_milli_total")
 
 	datasets := store.AgentDatasetHealth{
@@ -678,36 +676,6 @@ func (c *Client) namespaceMetrics(ctx context.Context, environment, namespace st
 		}
 	}
 
-	queryScalar := func(expr string) (float64, error) {
-		samples, err := c.query(ctx, expr)
-		if err != nil {
-			return 0, err
-		}
-		if len(samples) == 0 {
-			return 0, ErrNoData
-		}
-		return samples[0].value, nil
-	}
-
-	nodeCostExpr := fmt.Sprintf("sum(max by (node) (%s))", c.lookbackExpr("clustercost_node_hourly_cost", nil, clusterID))
-	cpuAllocExpr := fmt.Sprintf("sum(max by (node) (%s))", c.lookbackExpr("clustercost_node_cpu_allocatable_milli", nil, clusterID))
-	memAllocExpr := fmt.Sprintf("sum(max by (node) (%s))", c.lookbackExpr("clustercost_node_memory_allocatable_bytes", nil, clusterID))
-
-	nodeCost, err := queryScalar(nodeCostExpr)
-	if err == nil && nodeCost > 0 {
-		cpuAllocMilli, errCPU := queryScalar(cpuAllocExpr)
-		memAllocBytes, errMem := queryScalar(memAllocExpr)
-		if errCPU == nil && errMem == nil && cpuAllocMilli > 0 && memAllocBytes > 0 {
-			cpuPrice := (nodeCost * 0.5) / (cpuAllocMilli / 1000.0)
-			memPrice := (nodeCost * 0.5) / (memAllocBytes / (1024.0 * 1024.0 * 1024.0))
-			for _, entry := range out {
-				cpuUsageCores := float64(entry.CPUUsageMilli) / 1000.0
-				memUsageGB := float64(entry.MemoryUsageBytes) / (1024.0 * 1024.0 * 1024.0)
-				entry.HourlyCost = (cpuUsageCores * cpuPrice) + (memUsageGB * memPrice)
-			}
-		}
-	}
-
 	latest = c.seriesTimestampSafe(ctx, "clustercost_namespace_memory_rss_bytes_total")
 
 	type nodeAlloc struct {
@@ -888,26 +856,43 @@ func (c *Client) nodeMetrics(ctx context.Context, nodeName, window string) (map[
 		}
 	}
 
+	// Helper to extract metadata from labels
+	updateMeta := func(entry *store.NodeSummary, labels map[string]string) {
+		if entry.InstanceType == "" {
+			entry.InstanceType = valueOrDefault(labels["instance_type"],
+				valueOrDefault(labels["node_label_node_kubernetes_io_instance_type"],
+					labels["node_label_beta_kubernetes_io_instance_type"]))
+		}
+		if entry.Labels["topology_kubernetes_io_region"] == "" {
+			entry.Labels["topology_kubernetes_io_region"] = labels["cluster_region"]
+		}
+	}
+
 	// 2. Metrics List
 	metrics := []struct {
 		name          string
 		validLookback bool // if false, use standard lookback (e.g. for info that doesn't vary)
 		assign        func(entry *store.NodeSummary, value float64, labels map[string]string)
 	}{
-		{"clustercost_node_hourly_cost", true, func(e *store.NodeSummary, v float64, l map[string]string) {
-			e.HourlyCost = v
-			if e.InstanceType == "" {
-				e.InstanceType = valueOrDefault(l["instance_type"],
-					valueOrDefault(l["node_label_node_kubernetes_io_instance_type"],
-						l["node_label_beta_kubernetes_io_instance_type"]))
-			}
-		}},
+		// hourly_cost metric removed as it's deprecated. Cost is calculated in post-processing.
 		{"clustercost_node_cpu_usage_percent", true, func(e *store.NodeSummary, v float64, _ map[string]string) { e.CPUUsagePercent = v }},
 		{"clustercost_node_memory_usage_percent", true, func(e *store.NodeSummary, v float64, _ map[string]string) { e.MemoryUsagePercent = v }},
-		{"clustercost_node_cpu_allocatable_milli", true, func(e *store.NodeSummary, v float64, _ map[string]string) { e.CPUAllocatableMilli = int64(v) }},
-		{"clustercost_node_memory_allocatable_bytes", true, func(e *store.NodeSummary, v float64, _ map[string]string) { e.MemoryAllocatableBytes = int64(v) }},
-		{"clustercost_node_cpu_requested_milli", true, func(e *store.NodeSummary, v float64, _ map[string]string) { e.CPURequestedMilli = int64(v) }},
-		{"clustercost_node_memory_requested_bytes", true, func(e *store.NodeSummary, v float64, _ map[string]string) { e.MemoryRequestedBytes = int64(v) }},
+		{"clustercost_node_cpu_allocatable_milli", true, func(e *store.NodeSummary, v float64, l map[string]string) {
+			e.CPUAllocatableMilli = int64(v)
+			updateMeta(e, l)
+		}},
+		{"clustercost_node_memory_allocatable_bytes", true, func(e *store.NodeSummary, v float64, l map[string]string) {
+			e.MemoryAllocatableBytes = int64(v)
+			updateMeta(e, l)
+		}},
+		{"clustercost_node_cpu_requested_milli", true, func(e *store.NodeSummary, v float64, l map[string]string) {
+			e.CPURequestedMilli = int64(v)
+			updateMeta(e, l)
+		}},
+		{"clustercost_node_memory_requested_bytes", true, func(e *store.NodeSummary, v float64, l map[string]string) {
+			e.MemoryRequestedBytes = int64(v)
+			updateMeta(e, l)
+		}},
 		{"clustercost_node_cpu_limit_milli", true, func(e *store.NodeSummary, v float64, _ map[string]string) { e.CPULimitMilli = int64(v) }},
 		{"clustercost_node_memory_limit_bytes", true, func(e *store.NodeSummary, v float64, _ map[string]string) { e.MemoryLimitBytes = int64(v) }},
 	}
@@ -915,8 +900,7 @@ func (c *Client) nodeMetrics(ctx context.Context, nodeName, window string) (map[
 	for _, metric := range metrics {
 		by := "node"
 		// Preserve metadata labels in aggregation
-		if strings.Contains(metric.name, "hourly_cost") ||
-			strings.Contains(metric.name, "requested") ||
+		if strings.Contains(metric.name, "requested") ||
 			strings.Contains(metric.name, "allocatable") {
 			by = "node,instance_type,node_label_node_kubernetes_io_instance_type,node_label_beta_kubernetes_io_instance_type,cluster_region,topology_kubernetes_io_region"
 		}
@@ -1025,7 +1009,7 @@ func (c *Client) nodeMetrics(ctx context.Context, nodeName, window string) (map[
 		}
 	}
 
-	latest := c.seriesTimestampSafe(ctx, "clustercost_node_hourly_cost")
+	latest := c.seriesTimestampSafe(ctx, "clustercost_node_cpu_allocatable_milli")
 	return out, latest, nil
 }
 
@@ -1200,7 +1184,7 @@ func pickLatestStatus(samples []sample) map[string]string {
 
 func (c *Client) nodeNames(ctx context.Context) []string {
 	clusterID := c.resolveClusterID(ctx)
-	expr := fmt.Sprintf("max by (node) (%s)", c.lookbackExpr("clustercost_node_hourly_cost", nil, clusterID))
+	expr := fmt.Sprintf("max by (node) (%s)", c.lookbackExpr("clustercost_node_cpu_allocatable_milli", nil, clusterID))
 	samples, err := c.query(ctx, expr)
 	if err != nil {
 		return nil
