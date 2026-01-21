@@ -232,8 +232,18 @@ const NodesPage = () => {
                 <TableHead className="w-[150px] font-semibold text-foreground cursor-pointer" onClick={() => handleSort("cost")}>
                   Cost ({timeWindow}) <span className="text-[10px] ml-1 font-normal opacity-50">▼</span>
                 </TableHead>
-                <TableHead className="w-[250px] font-semibold text-foreground">CPU Efficiency</TableHead>
-                <TableHead className="w-[250px] font-semibold text-foreground">Memory Efficiency</TableHead>
+                <TableHead className="w-[250px] font-semibold text-foreground">
+                  CPU Efficiency
+                  <span className="ml-2 text-[10px] font-normal text-muted-foreground whitespace-nowrap opacity-80">
+                    (<span className="text-cyan-500">●</span> Usage / <span className="text-primary/50">●</span> Reserved)
+                  </span>
+                </TableHead>
+                <TableHead className="w-[250px] font-semibold text-foreground">
+                  Memory Efficiency
+                  <span className="ml-2 text-[10px] font-normal text-muted-foreground whitespace-nowrap opacity-80">
+                    (<span className="text-cyan-500">●</span> Usage / <span className="text-primary/50">●</span> Reserved)
+                  </span>
+                </TableHead>
                 <TableHead className="text-right pr-6 font-semibold text-foreground cursor-pointer" onClick={() => handleSort("waste")}>Action</TableHead>
               </TableRow>
             </TableHeader>
@@ -295,6 +305,9 @@ const NodesPage = () => {
                       usagePercent={node.cpuUsagePercent}
                       requestPercent={node.cpuRequestPercent}
                       costPerMonth={node.monthlyCost}
+                      usageAbsolute={node.cpuAllocatableMilli ? (node.cpuUsagePercent / 100) * (node.cpuAllocatableMilli / 1000) : 0}
+                      totalAbsolute={node.cpuAllocatableMilli ? node.cpuAllocatableMilli / 1000 : 0}
+                      unit="vCPUs"
                     />
                   </TableCell>
 
@@ -304,6 +317,9 @@ const NodesPage = () => {
                       usagePercent={node.memoryUsagePercent}
                       requestPercent={node.memRequestPercent}
                       costPerMonth={node.monthlyCost}
+                      usageAbsolute={node.memoryAllocatableBytes ? (node.memoryUsagePercent / 100) * (node.memoryAllocatableBytes / (1024 * 1024 * 1024)) : 0}
+                      totalAbsolute={node.memoryAllocatableBytes ? node.memoryAllocatableBytes / (1024 * 1024 * 1024) : 0}
+                      unit="GiB"
                     />
                   </TableCell>
 

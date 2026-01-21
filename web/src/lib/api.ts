@@ -341,8 +341,9 @@ export const fetchNamespaces = async (): Promise<NamespacesResponse> => {
   };
 };
 
-export const fetchNodes = async (): Promise<NodeCost[]> => {
-  const resp = await request<NodeListApiResponse>("/cost/nodes");
+export const fetchNodes = async (window?: string): Promise<NodeCost[]> => {
+  const query = window ? `?window=${window}` : "";
+  const resp = await request<NodeListApiResponse>(`/cost/nodes${query}`);
   return resp.items.map((node) => ({
     ...node,
     labels: node.labels ?? {},
