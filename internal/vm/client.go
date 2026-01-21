@@ -478,3 +478,133 @@ func formatLabels(labels map[string]string) string {
 	b.WriteByte('}')
 	return b.String()
 }
+
+// GetNodePods returns 24h P95 and Request metrics for all pods on a specific node.
+func (c *Client) GetNodePods(ctx context.Context, clusterID, nodeName string, window time.Duration) ([]store.PodMetrics, error) {
+	if nodeName == "" {
+		return nil, fmt.Errorf("node name is required")
+	}
+	if window <= 0 {
+		window = 24 * time.Hour
+	}
+	windowStr := formatDuration(window)
+
+	labels := map[string]string{
+		"node": nodeName,
+	}
+	if clusterID != "" {
+		labels["cluster_id"] = clusterID
+	}
+	labelStr := formatLabels(labels)
+
+	// We need 5 metrics per pod:
+	// 1. CPU Request (Max)
+	// 2. CPU Limit (Max) - to determine QoS
+	// 3. Mem Request (Max)
+	// 4. CPU Usage (P95)
+	// 5. Mem Usage (P95)
+
+	queries := map[string]string{
+		"cpu_req_max": fmt.Sprintf("max_over_time(clustercost_pod_cpu_request_millicores%s[%s])", labelStr, windowStr),
+		"cpu_lim_max": fmt.Sprintf("max_over_time(clustercost_pod_cpu_limit_millicores%s[%s])", labelStr, windowStr),
+		"mem_req_max": fmt.Sprintf("max_over_time(clustercost_pod_memory_request_bytes%s[%s])", labelStr, windowStr),
+		"cpu_add_p95": fmt.Sprintf("quantile_over_time(0.95, clustercost_pod_cpu_usage_milli%s[%s])", labelStr, windowStr),
+		"mem_add_p95": fmt.Sprintf("quantile_over_time(0.95, clustercost_pod_memory_rss_bytes%s[%s])", labelStr, windowStr),
+	}
+
+	// Helper struct to aggregate data
+	type podData struct {
+		Namespace string
+		PodName   string
+		CPUReq    float64
+		CPULim    float64
+		MemReq    float64
+		CPUP95    float64
+		MemP95    float64
+	}
+	podMap := make(map[string]*podData)
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var firstErr error
+
+	for key, query := range queries {
+		wg.Add(1)
+		go func(k, q string) {
+			defer wg.Done()
+			samples, err := c.query(ctx, q)
+			if err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				mu.Unlock()
+				return
+			}
+			mu.Lock()
+			for _, s := range samples {
+				ns := s.labels["namespace"]
+				pod := s.labels["pod"]
+				if ns == "" || pod == "" {
+					continue
+				}
+				id := ns + "|" + pod
+				if _, exists := podMap[id]; !exists {
+					podMap[id] = &podData{Namespace: ns, PodName: pod}
+				}
+				p := podMap[id]
+
+				switch k {
+				case "cpu_req_max":
+					p.CPUReq = s.value
+				case "cpu_lim_max":
+					p.CPULim = s.value
+				case "mem_req_max":
+					p.MemReq = s.value
+				case "cpu_add_p95":
+					p.CPUP95 = s.value
+				case "mem_add_p95":
+					p.MemP95 = s.value
+				}
+			}
+			mu.Unlock()
+		}(key, query)
+	}
+	wg.Wait()
+
+	if firstErr != nil {
+		return nil, fmt.Errorf("failed to query pod metrics: %w", firstErr)
+	}
+
+	results := make([]store.PodMetrics, 0, len(podMap))
+	for _, p := range podMap {
+		// QoS Logic
+		qos := "Burstable"
+		if p.CPUReq == 0 && p.MemReq == 0 {
+			qos = "BestEffort"
+		} else if p.CPUReq == p.CPULim && p.CPULim > 0 {
+			qos = "Guaranteed" // Simplified, strictly checking CPU for now
+		}
+
+		results = append(results, store.PodMetrics{
+			PodName:            p.PodName,
+			Namespace:          p.Namespace,
+			QoSClass:           qos,
+			CPURequestMilli:    int64(p.CPUReq),
+			CPUP95Milli:        p.CPUP95,
+			MemoryRequestBytes: int64(p.MemReq),
+			MemoryP95Bytes:     p.MemP95,
+		})
+	}
+
+	// Sort by Waste Amount (heuristic: max diff)
+	sort.Slice(results, func(i, j int) bool {
+		// Just sorting by name for stability for now, frontend handles logic sort
+		if results[i].Namespace != results[j].Namespace {
+			return results[i].Namespace < results[j].Namespace
+		}
+		return results[i].PodName < results[j].PodName
+	})
+
+	return results, nil
+}

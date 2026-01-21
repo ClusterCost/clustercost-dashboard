@@ -301,6 +301,17 @@ type NodeStats struct {
 	Window                string  `json:"window"`
 }
 
+// PodMetrics contains resource usage analysis for a single pod.
+type PodMetrics struct {
+	PodName            string  `json:"podName"`
+	Namespace          string  `json:"namespace"`
+	QoSClass           string  `json:"qosClass"`
+	CPURequestMilli    int64   `json:"cpuRequestMilli"`
+	CPUP95Milli        float64 `json:"cpuP95Milli"`
+	MemoryRequestBytes int64   `json:"memoryRequestBytes"`
+	MemoryP95Bytes     float64 `json:"memoryP95Bytes"`
+}
+
 // New creates a store seeded with agent configurations.
 func New(cfgs []config.AgentConfig, recommendedAgentVersion string) *Store {
 	agentConfigs := make(map[string]config.AgentConfig, len(cfgs))

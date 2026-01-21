@@ -365,6 +365,20 @@ export const fetchNodeStats = async (name: string, window: string): Promise<Node
   return request<NodeStats>(`/cost/nodes/${name}/stats?window=${window}`);
 };
 
+export interface PodMetrics {
+  podName: string;
+  namespace: string;
+  qosClass: string;
+  cpuRequestMilli: number;
+  cpuP95Milli: number;
+  memoryRequestBytes: number;
+  memoryP95Bytes: number;
+}
+
+export const fetchNodePods = async (name: string, window: string): Promise<PodMetrics[]> => {
+  return request<PodMetrics[]>(`/cost/nodes/${name}/pods?window=${window}`);
+};
+
 export const fetchResources = async (): Promise<ResourcesSummary> => {
   const resp = await request<ResourcesApiResponse>("/cost/resources");
   return {

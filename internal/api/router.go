@@ -30,6 +30,7 @@ type MetricsProvider interface {
 	ClusterMetadata(ctx context.Context) (store.ClusterMetadata, error)
 	NetworkTopology(ctx context.Context, opts store.NetworkTopologyOptions) ([]store.NetworkEdge, error)
 	GetNodeStats(ctx context.Context, clusterID, nodeName string, window time.Duration) (store.NodeStats, error)
+	GetNodePods(ctx context.Context, clusterID, nodeName string, window time.Duration) ([]store.PodMetrics, error)
 }
 
 // Handler wires HTTP requests to the VictoriaMetrics client.
@@ -76,6 +77,7 @@ func NewRouter(vmClient MetricsProvider, db *db.Store, st *store.Store, finopsEn
 				cost.Get("/nodes", h.Nodes)
 				cost.Get("/nodes/{name}", h.NodeDetail)
 				cost.Get("/nodes/{name}/stats", h.NodeStats)
+				cost.Get("/nodes/{name}/pods", h.NodePods)
 				cost.Get("/resources", h.Resources)
 			})
 			protected.Get("/agent", h.AgentStatus)
