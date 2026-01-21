@@ -113,6 +113,9 @@ export interface NamespacesResponse {
 type NodeCostApi = {
   nodeName: string;
   hourlyCost: number;
+  windowCost: number;
+  activeHours: number;
+  activeRatio: number;
   cpuUsagePercent: number;
   memoryUsagePercent: number;
   cpuRequestedMilli?: number;

@@ -132,6 +132,10 @@ type NodeSummary struct {
 	EgressPublicBytes   int64 `json:"egressPublicBytes"`
 	EgressCrossAZBytes  int64 `json:"egressCrossAZBytes"`
 	EgressInternalBytes int64 `json:"egressInternalBytes"`
+	// Historical / Window Data
+	ActiveHours float64 `json:"activeHours"` // Hours active in the selected window
+	ActiveRatio float64 `json:"activeRatio"` // 0.0 - 1.0
+	WindowCost  float64 `json:"windowCost"`  // Actual cost incurred in the window
 }
 
 // NodeListResponse wraps paginated node results.
@@ -275,6 +279,7 @@ type NodeFilter struct {
 	Search string
 	Limit  int
 	Offset int
+	Window string // "24h", "7d", "30d"
 }
 
 // PodContext wraps a PodMetric with its location metadata.

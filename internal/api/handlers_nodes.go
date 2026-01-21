@@ -23,6 +23,7 @@ func (h *Handler) Nodes(w http.ResponseWriter, r *http.Request) {
 		Search: q.Get("search"),
 		Limit:  parseLimit(q.Get("limit"), defaultNodeLimit, maxNodeLimit),
 		Offset: parseOffset(q.Get("offset")),
+		Window: q.Get("window"), // "24h", "7d", "30d"
 	}
 
 	resp, err := h.vm.NodeList(ctx, filter)

@@ -131,7 +131,7 @@ func (c *Client) NamespaceDetail(ctx context.Context, name string) (store.Namesp
 }
 
 func (c *Client) NodeList(ctx context.Context, filter store.NodeFilter) (store.NodeListResponse, error) {
-	nodes, ts, err := c.nodeMetrics(ctx, "")
+	nodes, ts, err := c.nodeMetrics(ctx, "", filter.Window)
 	if err != nil {
 		return store.NodeListResponse{}, err
 	}
@@ -169,7 +169,7 @@ func (c *Client) NodeList(ctx context.Context, filter store.NodeFilter) (store.N
 }
 
 func (c *Client) NodeDetail(ctx context.Context, name string) (store.NodeSummary, error) {
-	nodes, _, err := c.nodeMetrics(ctx, name)
+	nodes, _, err := c.nodeMetrics(ctx, name, "")
 	if err != nil {
 		return store.NodeSummary{}, err
 	}
@@ -790,7 +790,27 @@ func (c *Client) namespaceMetrics(ctx context.Context, environment, namespace st
 	return out, latest, nil
 }
 
-func (c *Client) nodeMetrics(ctx context.Context, nodeName string) (map[string]*store.NodeSummary, time.Time, error) {
+func (c *Client) Nodes(ctx context.Context, window string) ([]store.NodeSummary, error) {
+	nodeMetrics, _, err := c.nodeMetrics(ctx, "", window)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]store.NodeSummary, 0, len(nodeMetrics))
+	for _, n := range nodeMetrics {
+		n.Labels = nil // Optimization: potentially clear heavy labels if not needed
+		out = append(out, *n)
+	}
+
+	// Sort by Cost desc
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].WindowCost > out[j].WindowCost
+	})
+
+	return out, nil
+}
+
+func (c *Client) nodeMetrics(ctx context.Context, nodeName, window string) (map[string]*store.NodeSummary, time.Time, error) {
 	clusterID := c.resolveClusterID(ctx)
 	ctx = WithClusterID(ctx, clusterID)
 	labels := map[string]string{}
@@ -798,141 +818,153 @@ func (c *Client) nodeMetrics(ctx context.Context, nodeName string) (map[string]*
 		labels["node"] = nodeName
 	}
 
-	metrics := []struct {
-		name   string
-		assign func(entry *store.NodeSummary, value float64, labels map[string]string)
-	}{
-		{"clustercost_node_hourly_cost", func(e *store.NodeSummary, v float64, l map[string]string) {
-			e.HourlyCost = v
-			if e.InstanceType == "" {
-				e.InstanceType = l["instance_type"]
-				if e.InstanceType == "" {
-					e.InstanceType = l["node_label_node_kubernetes_io_instance_type"]
-				}
-				if e.InstanceType == "" {
-					e.InstanceType = l["node_label_beta_kubernetes_io_instance_type"]
-				}
-			}
-			for k, v := range l {
-				e.Labels[k] = v
-			}
-		}},
-		{"clustercost_node_cpu_usage_percent", func(e *store.NodeSummary, v float64, _ map[string]string) { e.CPUUsagePercent = v }},
-		{"clustercost_node_memory_usage_percent", func(e *store.NodeSummary, v float64, _ map[string]string) { e.MemoryUsagePercent = v }},
-		{"clustercost_node_cpu_allocatable_milli", func(e *store.NodeSummary, v float64, l map[string]string) {
-			e.CPUAllocatableMilli = int64(v)
-			if e.InstanceType == "" {
-				e.InstanceType = l["instance_type"]
-				if e.InstanceType == "" {
-					e.InstanceType = l["node_label_node_kubernetes_io_instance_type"]
-				}
-				if e.InstanceType == "" {
-					e.InstanceType = l["node_label_beta_kubernetes_io_instance_type"]
-				}
-			}
-			// Capture region from labels if not already present in basic labels
-			for k, v := range l {
-				e.Labels[k] = v
-			}
-		}},
-		{"clustercost_node_memory_allocatable_bytes", func(e *store.NodeSummary, v float64, _ map[string]string) { e.MemoryAllocatableBytes = int64(v) }},
-		{"clustercost_node_cpu_requested_milli", func(e *store.NodeSummary, v float64, l map[string]string) {
-			e.CPURequestedMilli = int64(v)
-			if e.InstanceType == "" {
-				e.InstanceType = l["instance_type"]
-			}
-		}},
-		{"clustercost_node_memory_requested_bytes", func(e *store.NodeSummary, v float64, l map[string]string) {
-			e.MemoryRequestedBytes = int64(v)
-			if e.InstanceType == "" {
-				e.InstanceType = l["instance_type"]
-			}
-		}},
-		{"clustercost_node_cpu_limit_milli", func(e *store.NodeSummary, v float64, _ map[string]string) { e.CPULimitMilli = int64(v) }},
-		{"clustercost_node_memory_limit_bytes", func(e *store.NodeSummary, v float64, _ map[string]string) { e.MemoryLimitBytes = int64(v) }},
-		{"clustercost_node_pod_count", func(e *store.NodeSummary, v float64, _ map[string]string) { e.PodCount = int(v) }},
-		{"clustercost_node_under_pressure", func(e *store.NodeSummary, v float64, _ map[string]string) { e.IsUnderPressure = v > 0.5 }},
+	// Parse Window
+	var windowDur time.Duration
+	var lookbackFunc string = "max_over_time"  // Default for "current" view (snapshot-ish)
+	var windowStr string = c.lookback.String() // Default internal lookback
+
+	if window != "" {
+		d, err := time.ParseDuration(window)
+		if err == nil {
+			windowDur = d
+			windowStr = window
+			lookbackFunc = "avg_over_time"
+		}
+	} else {
+		// Assuming standard "current" view implies "1h" or just last scrape?
+		// For consistency with existing logic, we keep standard lookback but use max/last.
 	}
+
+	// If Windowed View: Primary source is agent_up to find ALL nodes active in window
+	// If Snapshot View: Primary source is usually node_info or just scraping metrics.
+	// We'll use the same multi-metric approach but adjust the aggregation.
 
 	out := make(map[string]*store.NodeSummary)
+
+	// Helper to safely assign to out map
+	getOrCreate := func(node string) *store.NodeSummary {
+		if node == "" {
+			return nil
+		}
+		if _, ok := out[node]; !ok {
+			out[node] = &store.NodeSummary{
+				NodeName: node,
+				Labels:   map[string]string{},
+				Taints:   []string{},
+			}
+		}
+		return out[node]
+	}
+
+	// 1. Availability / Active Time
+	// Query: avg_over_time(clustercost_agent_up[window])
+	// Value: 0.0 - 1.0 (fraction of time active)
+	availExpr := fmt.Sprintf("avg_over_time(clustercost_agent_up%s[%s])", formatLabels(c.scopedLabels(labels, clusterID)), windowStr)
+	availSamples, err := c.query(ctx, availExpr)
+	if err == nil {
+		for _, s := range availSamples {
+			node := s.labels["node"]
+			entry := getOrCreate(node)
+			if entry != nil {
+				entry.ActiveRatio = s.value
+				if windowDur > 0 {
+					entry.ActiveHours = s.value * windowDur.Hours()
+				} else {
+					// Default assumption if no window: 100% active (snapshot)
+					entry.ActiveRatio = 1.0
+					entry.ActiveHours = 24 * 30 // Monthly projection basis
+				}
+
+				// Extract Metadata from Agent Up
+				if entry.InstanceType == "" {
+					entry.InstanceType = valueOrDefault(s.labels["instance_type"],
+						valueOrDefault(s.labels["node_label_node_kubernetes_io_instance_type"],
+							s.labels["node_label_beta_kubernetes_io_instance_type"]))
+				}
+				if entry.Labels["topology_kubernetes_io_region"] == "" {
+					entry.Labels["topology_kubernetes_io_region"] = s.labels["cluster_region"]
+				}
+			}
+		}
+	}
+
+	// 2. Metrics List
+	metrics := []struct {
+		name          string
+		validLookback bool // if false, use standard lookback (e.g. for info that doesn't vary)
+		assign        func(entry *store.NodeSummary, value float64, labels map[string]string)
+	}{
+		{"clustercost_node_hourly_cost", true, func(e *store.NodeSummary, v float64, l map[string]string) {
+			e.HourlyCost = v
+			if e.InstanceType == "" {
+				e.InstanceType = valueOrDefault(l["instance_type"],
+					valueOrDefault(l["node_label_node_kubernetes_io_instance_type"],
+						l["node_label_beta_kubernetes_io_instance_type"]))
+			}
+		}},
+		{"clustercost_node_cpu_usage_percent", true, func(e *store.NodeSummary, v float64, _ map[string]string) { e.CPUUsagePercent = v }},
+		{"clustercost_node_memory_usage_percent", true, func(e *store.NodeSummary, v float64, _ map[string]string) { e.MemoryUsagePercent = v }},
+		{"clustercost_node_cpu_allocatable_milli", true, func(e *store.NodeSummary, v float64, _ map[string]string) { e.CPUAllocatableMilli = int64(v) }},
+		{"clustercost_node_memory_allocatable_bytes", true, func(e *store.NodeSummary, v float64, _ map[string]string) { e.MemoryAllocatableBytes = int64(v) }},
+		{"clustercost_node_cpu_requested_milli", true, func(e *store.NodeSummary, v float64, _ map[string]string) { e.CPURequestedMilli = int64(v) }},
+		{"clustercost_node_memory_requested_bytes", true, func(e *store.NodeSummary, v float64, _ map[string]string) { e.MemoryRequestedBytes = int64(v) }},
+		{"clustercost_node_cpu_limit_milli", true, func(e *store.NodeSummary, v float64, _ map[string]string) { e.CPULimitMilli = int64(v) }},
+		{"clustercost_node_memory_limit_bytes", true, func(e *store.NodeSummary, v float64, _ map[string]string) { e.MemoryLimitBytes = int64(v) }},
+	}
+
 	for _, metric := range metrics {
 		by := "node"
-		// We want to preserve instance_type and region information for all relevant metrics
-		// specifically request and allocatable metrics which often carry this metadata.
-		if metric.name == "clustercost_node_hourly_cost" ||
-			metric.name == "clustercost_node_cpu_requested_milli" ||
-			metric.name == "clustercost_node_memory_requested_bytes" ||
-			metric.name == "clustercost_node_cpu_allocatable_milli" {
-			// Include standard and legacy k8s labels to survive aggregation
-			by = "node,instance_type,node_label_node_kubernetes_io_instance_type,node_label_beta_kubernetes_io_instance_type,cluster_region,topology_kubernetes_io_region,failure_domain_beta_kubernetes_io_region"
+		// Preserve metadata labels in aggregation
+		if strings.Contains(metric.name, "hourly_cost") ||
+			strings.Contains(metric.name, "requested") ||
+			strings.Contains(metric.name, "allocatable") {
+			by = "node,instance_type,node_label_node_kubernetes_io_instance_type,node_label_beta_kubernetes_io_instance_type,cluster_region,topology_kubernetes_io_region"
 		}
-		expr := fmt.Sprintf("max by (%s) (%s)", by, c.lookbackExpr(metric.name, labels, clusterID))
-		samples, err := c.query(ctx, expr)
+
+		// determine function
+		fn := lookbackFunc
+		// For cost, average over time gives the average hourly rate during that window.
+		// For usage %, average makes sense.
+		// For Requests/Limits/Allocatable, they might vary if node resized (rare) or replaced. Average is decent.
+
+		expr := fmt.Sprintf("%s(%s%s[%s])", fn, metric.name, formatLabels(c.scopedLabels(labels, clusterID)), windowStr)
+		// Need aggregation to preserve labels and unique by node
+		// max by (...) for snapshots, but avg by (...) for windows?
+		// Actually "avg by" works for all if we want the average stat.
+		aggOp := "avg"
+		if !strings.Contains(metric.name, "percent") && !strings.Contains(metric.name, "cost") {
+			// For allocatable/requests, max is often safer to see peak reservation?
+			// But for "Ghost Cost", average request is better?
+			// Let's stick to Average for Historical Analysis.
+			aggOp = "avg"
+		}
+
+		fullExpr := fmt.Sprintf("%s by (%s) (%s)", aggOp, by, expr)
+
+		samples, err := c.query(ctx, fullExpr)
 		if err != nil {
-			return nil, time.Time{}, err
+			continue // Skip failing metrics rather than crash whole request
 		}
+
 		for _, sample := range samples {
 			node := sample.labels["node"]
-			if node == "" {
-				continue
-			}
-			entry := out[node]
-			if entry == nil {
-				entry = &store.NodeSummary{
-					NodeName: node,
-					Labels:   map[string]string{},
-					Taints:   []string{},
-				}
-				out[node] = entry
-			}
-			metric.assign(entry, sample.value, sample.labels)
-		}
-	}
-
-	// Fetch metadata from Agent Status if available (User suggestion)
-	agentSamples, err := c.seriesTimestamp(ctx, "clustercost_agent_up", labels)
-	if err == nil {
-		for _, s := range agentSamples {
-			node := s.labels["node"]
-			if node == "" {
-				continue
-			}
-			entry := out[node]
-			if entry == nil {
-				// We don't create new entries just from agent_up, only enrich existing ones
-				// or maybe we should? For now, let's just enrich.
-				continue
-			}
-
-			// Extract Instance Type if missing
-			if entry.InstanceType == "" {
-				if v := s.labels["instance_type"]; v != "" {
-					entry.InstanceType = v
-				} else if v := s.labels["node_label_node_kubernetes_io_instance_type"]; v != "" {
-					entry.InstanceType = v
-				} else if v := s.labels["node_label_beta_kubernetes_io_instance_type"]; v != "" {
-					entry.InstanceType = v
-				}
-			}
-
-			// extract region if missing
-			if entry.Labels["topology_kubernetes_io_region"] == "" {
-				if v := s.labels["cluster_region"]; v != "" {
-					entry.Labels["cluster_region"] = v
-					entry.Labels["topology_kubernetes_io_region"] = v // Normalizing
-				} else {
-					// Regex fallback for AWS DNS names
-					// e.g. ip-10-30-16-166.us-west-2.compute.internal
-					re := regexp.MustCompile(`\.(us-[a-z]+-\d+)\.`)
-					matches := re.FindStringSubmatch(entry.NodeName)
-					if len(matches) > 1 {
-						entry.Labels["topology_kubernetes_io_region"] = matches[1]
-					}
-				}
+			entry := getOrCreate(node)
+			if entry != nil {
+				metric.assign(entry, sample.value, sample.labels)
 			}
 		}
 	}
 
+	// 3. Post-Processing & Cost Backfill
+	var pricing *store.PricingCatalog
+	if c.pricing != nil {
+		pricing = c.pricing
+	} else {
+		// NewPricingCatalog now takes 0 args (static)
+		pricing = store.NewPricingCatalog()
+	}
+
+	// Fetch node status
 	statusSamples, err := c.seriesTimestamp(ctx, "clustercost_node_status", labels)
 	if err != nil && err != ErrNoData {
 		return nil, time.Time{}, err
@@ -944,30 +976,19 @@ func (c *Client) nodeMetrics(ctx context.Context, nodeName string) (map[string]*
 		}
 	}
 
-	var pricing *store.PricingCatalog
-	if c.pricing != nil {
-		pricing = c.pricing
-	} else {
-		pricing = store.NewPricingCatalog()
-	}
-
-	// Backfill Costs if missing using the Pricing Catalog
 	for _, node := range out {
-		if node.HourlyCost > 0 {
-			continue
+		// Extract region from name fallback
+		if node.Labels["topology_kubernetes_io_region"] == "" {
+			re := regexp.MustCompile(`\.(us-[a-z]+-\d+)\.`)
+			matches := re.FindStringSubmatch(node.NodeName)
+			if len(matches) > 1 {
+				node.Labels["topology_kubernetes_io_region"] = matches[1]
+			}
 		}
 
-		// Try to find region
 		region := node.Labels["topology_kubernetes_io_region"]
 		if region == "" {
-			region = node.Labels["failure_domain_beta_kubernetes_io_region"]
-		}
-		if region == "" {
-			region = node.Labels["cluster_region"]
-		}
-		if region == "" {
 			// Fallback: Default region if unknown, often us-east-1 or inferred from node name
-			// e.g. ip-10-30-12-16.us-west-2.compute.internal
 			if strings.Contains(node.NodeName, "us-east-1") {
 				region = "us-east-1"
 			} else if strings.Contains(node.NodeName, "us-west-2") {
@@ -979,12 +1000,29 @@ func (c *Client) nodeMetrics(ctx context.Context, nodeName string) (map[string]*
 			}
 		}
 
+		// Update region in labels so it persists
+		if node.Labels == nil {
+			node.Labels = map[string]string{}
+		}
+		node.Labels["topology_kubernetes_io_region"] = region
+
 		instanceType := node.InstanceType
 		if instanceType == "" {
 			instanceType = "m5.large" // Default fallback to avoid 0 cost
 		}
 
-		node.HourlyCost = pricing.GetTotalNodePrice(ctx, region, instanceType)
+		if node.HourlyCost == 0 {
+			node.HourlyCost = pricing.GetTotalNodePrice(context.Background(), region, instanceType)
+		}
+
+		// CALCULATE WINDOW COST / TOTAL COST
+		if windowDur > 0 {
+			// Real Cost = HourlyRate * ActiveHours
+			node.WindowCost = node.HourlyCost * node.ActiveHours
+		} else {
+			// Snapshot projection (Monthly)
+			node.WindowCost = node.HourlyCost * 730
+		}
 	}
 
 	latest := c.seriesTimestampSafe(ctx, "clustercost_node_hourly_cost")

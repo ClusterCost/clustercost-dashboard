@@ -1,4 +1,4 @@
-import { useMemo, useState, type ChangeEvent } from "react";
+import { useMemo, useState, useCallback, type ChangeEvent } from "react";
 import { fetchNodes, type NodeCost } from "../../lib/api";
 import { formatCurrency, formatPercentage, relativeTimeFromIso, toMonthlyCost, milliToCores } from "../../lib/utils";
 import { useApiData } from "../../hooks/useApiData";
@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import NodeDetailSheet from "@/components/nodes/NodeDetailSheet";
 import { MetricCard } from "@/components/common/MetricCard";
@@ -17,10 +18,15 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 type SortKey = "cost" | "waste" | "efficiency";
 
 const NodesPage = () => {
-  const { data, loading, error, refresh } = useApiData(fetchNodes);
+  const [timeWindow, setTimeWindow] = useState("24h");
+
+  // Fetch with window
+  const fetchNodesWithWindow = useCallback(() => fetchNodes(timeWindow), [timeWindow]);
+  const { data, loading, error, refresh } = useApiData(fetchNodesWithWindow);
+
   const nodes = data ?? [];
   const [search, setSearch] = useState("");
-  const [sortKey, setSortKey] = useState<SortKey>("waste");
+  const [sortKey, setSortKey] = useState<SortKey>("cost"); // Default to cost for financial view
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [selectedNode, setSelectedNode] = useState<(NodeCost & { monthlyCost: number }) | null>(null);
 
@@ -47,9 +53,11 @@ const NodesPage = () => {
         isEstimate = true;
       }
 
-      const monthlyCost = hourlyCost * 730;
-      const cpuAllocatable = node.cpuAllocatableMilli ?? 0;
+      // Use backend provided WindowCost if activeHours logic applied, otherwise calculate projection
+      const windowCost = node.windowCost || (hourlyCost * 24); // fallback
+      const monthlyCost = hourlyCost * 730; // Still useful for reference
 
+      const cpuAllocatable = node.cpuAllocatableMilli ?? 0;
       const cpuRequestPercent = cpuAllocatable > 0 ? ((node.cpuRequestedMilli ?? 0) / cpuAllocatable) * 100 : 0;
       const cpuUsage = node.cpuUsagePercent ?? 0;
 
@@ -58,9 +66,10 @@ const NodesPage = () => {
       const memRequestPercent = memAllocatable > 0 ? ((node.memoryRequestedBytes ?? 0) / memAllocatable) * 100 : 0;
       const memUsage = node.memoryUsagePercent ?? 0;
 
-      // FinOps Waste Calculation: Paying for Request but not Using it (CPU dominant for now, but could blend)
+      // FinOps Waste Calculation
       const wastePercent = Math.max(0, cpuRequestPercent - cpuUsage);
-      const wasteAmount = monthlyCost * (wastePercent / 100);
+      // Waste Amount based on Window Cost
+      const wasteAmount = windowCost * (wastePercent / 100);
 
       const isEfficient = wastePercent < 15;
       const isOverProvisioned = wastePercent > 30;
@@ -72,38 +81,47 @@ const NodesPage = () => {
         memoryUsagePercent: memUsage,
         memRequestPercent,
         monthlyCost,
+        windowCost,
         isEstimate,
         wastePercent,
         wasteAmount,
         isEfficient,
         isOverProvisioned,
-        shortName: node.nodeName.length > 20 ? node.nodeName.substring(0, 15) + "..." : node.nodeName
+        shortName: node.nodeName // no truncation
       };
     });
   }, [nodes]);
 
   const summary = useMemo(() => {
-    const totalMonthly = derivedNodes.reduce((sum, n) => sum + n.monthlyCost, 0);
+    const totalWindowCost = derivedNodes.reduce((sum, n) => sum + n.windowCost, 0);
     const totalWaste = derivedNodes.reduce((sum, n) => sum + n.wasteAmount, 0);
-    const potentialSavings = totalWaste * 0.6; // Conservative achievable savings
+    const potentialSavings = totalWaste * 0.6;
 
-    return { totalMonthly, totalWaste, potentialSavings };
+    return { totalWindowCost, totalWaste, potentialSavings };
   }, [derivedNodes]);
 
   const sortedNodes = useMemo(() => {
     const rows = [...derivedNodes];
     rows.sort((a, b) => {
-      const valA = sortKey === "waste" ? a.wasteAmount : (sortKey === "cost" ? a.monthlyCost : a.wastePercent);
-      const valB = sortKey === "waste" ? b.wasteAmount : (sortKey === "cost" ? b.monthlyCost : b.wastePercent);
+      const valA = sortKey === "waste" ? a.wasteAmount : (sortKey === "cost" ? a.windowCost : a.wastePercent);
+      const valB = sortKey === "waste" ? b.wasteAmount : (sortKey === "cost" ? b.windowCost : b.wastePercent);
       return sortDirection === "asc" ? valA - valB : valB - valA;
     });
     return rows;
   }, [derivedNodes, sortKey, sortDirection]);
 
-  // Sorting Handler
   const handleSort = (key: SortKey) => {
     if (key === sortKey) setSortDirection(d => d === "desc" ? "asc" : "desc");
     else { setSortKey(key); setSortDirection("desc"); }
+  };
+
+  const getWindowLabel = (w: string) => {
+    switch (w) {
+      case "24h": return "Last 24 Hours";
+      case "7d": return "Last 7 Days";
+      case "30d": return "Last 30 Days";
+      default: return w;
+    }
   };
 
   if (loading && !data) return <Skeleton className="h-[80vh] w-full rounded-xl" />;
@@ -115,26 +133,38 @@ const NodesPage = () => {
       <div className="flex justify-between items-end border-b border-border/40 pb-6">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Cluster Financials</h1>
-          <p className="text-muted-foreground mt-1">Real-time analysis of infrastructure efficiency and waste.</p>
+          <p className="text-muted-foreground mt-1">Real-time analysis based on actual uptime.</p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex gap-3 items-center">
+          <Select value={timeWindow} onValueChange={setTimeWindow}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="Select Window" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="24h">Last 24 Hours</SelectItem>
+              <SelectItem value="7d">Last 7 Days</SelectItem>
+              <SelectItem value="30d">Last 30 Days</SelectItem>
+            </SelectContent>
+          </Select>
           <Button variant="outline" size="sm" onClick={refresh}>Refresh</Button>
           <Button size="sm">Download Report</Button>
         </div>
       </div>
 
-      {/* The "Truth" Cards - High Impact Typography */}
+      {/* The "Truth" Cards */}
       <div className="grid gap-6 md:grid-cols-3">
         <Card className="bg-card/50 backdrop-blur-sm shadow-sm md:col-span-1">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Monthly Spend</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
+              Spend ({timeWindow})
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-4xl font-bold tracking-tighter text-foreground">
-              {formatCurrency(summary.totalMonthly)}
+              {formatCurrency(summary.totalWindowCost)}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              Run rate based on current capacity
+              Actual cost based on {getWindowLabel(timeWindow)} uptime
             </p>
           </CardContent>
         </Card>
@@ -147,7 +177,7 @@ const NodesPage = () => {
           </div>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-              Monthly Waste <AlertTriangleIcon className="w-4 h-4 text-destructive" />
+              Waste ({timeWindow}) <AlertTriangleIcon className="w-4 h-4 text-destructive" />
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -155,7 +185,7 @@ const NodesPage = () => {
               {formatCurrency(summary.totalWaste)}
             </div>
             <p className="text-xs text-muted-foreground mt-2 font-mono">
-              Money burned on unused reservations
+              Money burned on unused capacity
             </p>
           </CardContent>
         </Card>
@@ -180,9 +210,8 @@ const NodesPage = () => {
         <div className="flex flex-col sm:flex-row justify-between items-center mb-4 gap-4">
           <div className="flex items-center gap-2">
             <Badge variant="outline" className="h-6 px-2 text-xs">
-              {sortedNodes.length} Nodes
+              {sortedNodes.length} Nodes (Active in {timeWindow})
             </Badge>
-            {/* Future: Add Filter logic here */}
           </div>
           <div className="relative w-full sm:max-w-xs">
             <SearchIcon className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -201,7 +230,7 @@ const NodesPage = () => {
               <TableRow className="hover:bg-transparent border-b border-border/50">
                 <TableHead className="w-[200px] font-semibold text-foreground">Node Identity</TableHead>
                 <TableHead className="w-[150px] font-semibold text-foreground cursor-pointer" onClick={() => handleSort("cost")}>
-                  Cost <span className="text-[10px] ml-1 font-normal opacity-50">▼</span>
+                  Cost ({timeWindow}) <span className="text-[10px] ml-1 font-normal opacity-50">▼</span>
                 </TableHead>
                 <TableHead className="w-[250px] font-semibold text-foreground">CPU Efficiency</TableHead>
                 <TableHead className="w-[250px] font-semibold text-foreground">Memory Efficiency</TableHead>
@@ -236,7 +265,7 @@ const NodesPage = () => {
                     <div className="flex flex-col">
                       <div className="flex items-baseline gap-1">
                         <span className={`${node.isEstimate ? "text-muted-foreground font-normal" : "font-bold text-foreground"}`}>
-                          {formatCurrency(node.monthlyCost)}
+                          {formatCurrency(node.windowCost)}
                         </span>
                         {node.isEstimate && (
                           <TooltipProvider>
@@ -247,9 +276,16 @@ const NodesPage = () => {
                           </TooltipProvider>
                         )}
                       </div>
-                      <span className="text-[10px] text-muted-foreground font-mono">
-                        ${Number(node.hourlyCost.toFixed(4))}/hr
-                      </span>
+                      <div className="flex flex-col gap-0.5 mt-0.5">
+                        <span className="text-[10px] text-muted-foreground font-mono">
+                          ${Number(node.hourlyCost.toFixed(4))}/hr
+                        </span>
+                        {node.activeHours > 0 && (
+                          <span className="text-[10px] text-emerald-600/70 font-mono">
+                            {node.activeHours.toFixed(1)}h active ({((node.activeRatio || 0) * 100).toFixed(0)}%)
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </TableCell>
 
